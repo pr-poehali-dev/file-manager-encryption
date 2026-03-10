@@ -67,15 +67,24 @@ def handler(event: dict, context) -> dict:
                 s3_key, file_type, fake_s3_key, real_cdn, fake_cdn = row
 
                 is_image = file_type in ("png", "jpg", "jpeg")
+                s3 = get_s3()
+
                 if is_image:
+                    # Try to load fake txt content if exists
+                    fake_txt_content = None
+                    if fake_s3_key:
+                        try:
+                            obj = s3.get_object(Bucket="files", Key=fake_s3_key)
+                            fake_txt_content = obj["Body"].read().decode("utf-8")
+                        except Exception:
+                            pass
                     return {"statusCode": 200, "headers": CORS, "body": json.dumps({
                         "type": file_type,
                         "cdn_url": real_cdn or make_cdn_url(s3_key),
-                        "fake_cdn_url": fake_cdn or (make_cdn_url(fake_s3_key) if fake_s3_key else None),
+                        "fake_txt_content": fake_txt_content,
                     }, ensure_ascii=False)}
 
                 # txt — read from S3
-                s3 = get_s3()
                 obj = s3.get_object(Bucket="files", Key=s3_key)
                 content = obj["Body"].read()
                 return {"statusCode": 200, "headers": CORS, "body": json.dumps({"content": content.decode("utf-8"), "type": "txt"}, ensure_ascii=False)}
@@ -120,26 +129,25 @@ def handler(event: dict, context) -> dict:
             s3.put_object(Bucket="files", Key=s3_key, Body=file_bytes, ContentType=content_type)
             real_cdn = make_cdn_url(s3_key)
 
-            # Upload fake image (shown when encrypted) — same name but .jpg
+            # Upload fake txt (shown as text when encrypted) — same name but .txt
             fake_s3_key = None
             fake_cdn = None
             if is_image and fake_data_b64:
                 base_name = name.rsplit(".", 1)[0]
-                fake_s3_key = f"documents/{folder_id}/{base_name}.jpg"
+                fake_s3_key = f"documents/{folder_id}/{base_name}.txt"
                 fake_bytes = base64.b64decode(fake_data_b64)
-                s3.put_object(Bucket="files", Key=fake_s3_key, Body=fake_bytes, ContentType="image/jpeg")
-                fake_cdn = make_cdn_url(fake_s3_key)
+                s3.put_object(Bucket="files", Key=fake_s3_key, Body=fake_bytes, ContentType="text/plain; charset=utf-8")
 
             encrypted_name = encrypt_name(name)
             cur.execute(
-                f"INSERT INTO {SCHEMA}.documents (folder_id, name, encrypted_name, file_type, s3_key, fake_s3_key, cdn_url, fake_cdn_url) VALUES (%s, %s, %s, %s, %s, %s, %s, %s) RETURNING id",
-                (folder_id, name, encrypted_name, file_type, s3_key, fake_s3_key, real_cdn, fake_cdn)
+                f"INSERT INTO {SCHEMA}.documents (folder_id, name, encrypted_name, file_type, s3_key, fake_s3_key, cdn_url) VALUES (%s, %s, %s, %s, %s, %s, %s) RETURNING id",
+                (folder_id, name, encrypted_name, file_type, s3_key, fake_s3_key, real_cdn)
             )
             new_id = cur.fetchone()[0]
             conn.commit()
             return {"statusCode": 201, "headers": CORS, "body": json.dumps({
                 "id": new_id, "name": name, "encrypted_name": encrypted_name,
-                "cdn_url": real_cdn, "fake_cdn_url": fake_cdn,
+                "cdn_url": real_cdn, "has_fake_txt": bool(fake_s3_key),
             }, ensure_ascii=False)}
 
         elif method == "DELETE":
