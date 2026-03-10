@@ -113,11 +113,17 @@ export default function Index() {
 
   // Fake image open animation (glitch)
   const [fakeImgKey, setFakeImgKey] = useState(0);
+  // Encrypted text glitch key (re-triggers animation on file open)
+  const [encTextKey, setEncTextKey] = useState(0);
 
   // Encrypt-back animation (red scan line, fake appears from top)
   const [encryptingFile, setEncryptingFile] = useState(false);
   const [encryptScan, setEncryptScan] = useState(0); // 0..100 scan progress
   const encryptAnimRef = useRef<number | null>(null);
+
+  // Folder/file list decrypt animation
+  const [treeReveal, setTreeReveal] = useState(false); // true = items are animating in
+  const [treeRevealKey, setTreeRevealKey] = useState(0);
 
   // Admin state
   const [adminTab, setAdminTab] = useState<"riddles" | "docs">("riddles");
@@ -309,6 +315,9 @@ export default function Index() {
     if (ans === correct) {
       if (riddleContext === "files") {
         setDecrypted(true);
+        setTreeReveal(true);
+        setTreeRevealKey(k => k + 1);
+        setTimeout(() => setTreeReveal(false), 2000);
         addHistory(currentUser, "decrypt_ok", "Список файлов расшифрован — верный ответ");
       } else {
         // Запускаем анимацию перед показом содержимого
@@ -391,9 +400,10 @@ export default function Index() {
     setEncryptScan(0);
     if (decryptAnimRef.current) clearInterval(decryptAnimRef.current);
     if (encryptAnimRef.current) clearInterval(encryptAnimRef.current);
-    // Запускаем глитч-анимацию появления фейкового изображения
+    // Запускаем глитч-анимацию появления изображения или зашифрованного текста
     const isImg = file ? ["png", "jpg", "jpeg"].includes(file.type) : false;
     if (isImg) setFakeImgKey(k => k + 1);
+    else setEncTextKey(k => k + 1);
     if (file?.isDb && file.dbId) {
       loadDbFileContent(file.dbId);
     }
@@ -617,22 +627,30 @@ export default function Index() {
                 📁 Структура файлов
               </div>
               <div className={inset() + " flex-1 overflow-auto"}>
-                {FOLDERS.map(folder => (
+                {FOLDERS.map((folder, fi) => (
                   <div key={folder.id}>
                     <div
                       className={`flex items-center gap-1.5 px-2 py-0.5 cursor-pointer text-xs select-none ${selectedFolder === folder.id && !expandedFolders.has(folder.id) ? "bg-[#000080] text-white" : "hover:bg-[#000080] hover:text-white text-black"}`}
                       onClick={() => toggleFolder(folder.id)}
+                      style={treeReveal ? {
+                        animation: "treeItemReveal 0.4s ease-out both",
+                        animationDelay: `${fi * 60}ms`,
+                      } : undefined}
                     >
                       <span className="text-sm leading-none">{expandedFolders.has(folder.id) ? "📂" : "📁"}</span>
                       <span className={decrypted ? "" : "text-[#800000] font-bold"}>
                         {decrypted ? folder.name : folder.encrypted}
                       </span>
                     </div>
-                    {expandedFolders.has(folder.id) && allFiles.filter(f => f.folderId === folder.id).map(file => (
+                    {expandedFolders.has(folder.id) && allFiles.filter(f => f.folderId === folder.id).map((file, fii) => (
                       <div
                         key={file.id}
                         className={`flex items-center gap-1.5 pl-7 pr-2 py-0.5 cursor-pointer text-xs select-none ${selectedFile === file.id ? "bg-[#000080] text-white" : "hover:bg-[#000080] hover:text-white text-black"}`}
                         onClick={() => handleFileClick(file.id)}
+                        style={treeReveal ? {
+                          animation: "treeItemReveal 0.4s ease-out both",
+                          animationDelay: `${(fi * 60) + 30 + fii * 40}ms`,
+                        } : undefined}
                       >
                         <span className="text-sm leading-none">{file.type === "png" ? "🖼" : "📄"}</span>
                         <span className={decrypted ? "" : "text-[#800000] font-bold"}>
@@ -700,7 +718,11 @@ export default function Index() {
                       }
                     }
                     return (
-                      <pre className="text-xs text-[#800000] leading-5 whitespace-pre-wrap break-all font-mono">
+                      <pre
+                        key={encTextKey}
+                        className="text-xs text-[#800000] leading-5 whitespace-pre-wrap break-all font-mono"
+                        style={{ animation: "encTextGlitch 0.65s ease-out both" }}
+                      >
 {`[ЗАШИФРОВАННЫЙ ДОКУМЕНТ]\n${"─".repeat(34)}\n\n${encryptedContent()}\n\n${"─".repeat(34)}\n[ТРЕБУЕТСЯ РАСШИФРОВКА]`}
                       </pre>
                     );
