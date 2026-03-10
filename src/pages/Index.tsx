@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 
-const VALID_LOGINS = ["admin", "argentarius", "actuari", "edilus", "cpd", "mortum"];
-const ADMIN_LOGIN = "admin";
+const VALID_LOGINS = ["grandmaster", "argentarius", "actuari", "edilus", "cpd", "mortum"];
+const ADMIN_LOGIN = "grandmaster";
 const SESSION_DURATION = 30 * 60 * 1000;      // 30 минут
 const PENALTY = 10 * 60 * 1000;               // 10 минут штраф
 const LOCKOUT_DURATION = 180 * 60 * 1000;     // 180 минут блокировки
@@ -37,6 +37,9 @@ function clearSession(login: string) {
 
 const RIDDLES_URL = "https://functions.poehali.dev/fb6212ce-7863-4f5a-9bca-f2f628978fd2";
 const DOCUMENTS_URL = "https://functions.poehali.dev/69fbae1c-db1f-49dc-a39c-63ccc8caba63";
+const RECORDS_URL = "https://functions.poehali.dev/e1958fc3-1b43-4e30-ab4e-e22a3f35e115";
+const TERRITORIES_URL = "https://functions.poehali.dev/8d2c1129-ba2a-42c6-ba25-5b73640423cb";
+const ORDERS_URL = "https://functions.poehali.dev/59634aae-316f-4b23-ac7b-20d5b698fdb6";
 
 const FOLDERS = [
   { id: "f1", name: "Телефоны", encrypted: "7Ξq∄#∅⊗nΨ2" },
@@ -45,6 +48,13 @@ const FOLDERS = [
   { id: "f4", name: "Открытые заказы", encrypted: "Ξ∮⊞8ℜ∱⌁∰Φ∄k" },
   { id: "f5", name: "Архив заказов", encrypted: "⊗∂ℑΘ∇∁6⊛Γ⌀" },
   { id: "f6", name: "Архив документов", encrypted: "∯∬Σ⊕ℵΛ∮⊘∄Ξ" },
+  { id: "f7", name: "Таблица рекордов", encrypted: "∑⊗ΩΠ∂ℑ∇⊕∫" },
+  { id: "f8", name: "Таблица территорий", encrypted: "⊞Ξ∯∐ℵ⌁∱Φ⊘" },
+];
+
+const VIRTUAL_FILES = [
+  { id: "vf7_records", folderId: "f7", name: "Таблица рекордов.txt", encrypted: "∑∂Ψ∇⊕∫∮ℵ⊗", type: "special_records", isDb: false as const, dbId: undefined as undefined, cdnUrl: null as null, fakeCdnUrl: null as null, content: "" },
+  { id: "vf8_territories", folderId: "f8", name: "Таблица территорий.txt", encrypted: "Ξ⊘∯⌁∱Φ∐ℑ⊞", type: "special_territories", isDb: false as const, dbId: undefined as undefined, cdnUrl: null as null, fakeCdnUrl: null as null, content: "" },
 ];
 
 type HistoryEvent = {
@@ -55,10 +65,14 @@ type HistoryEvent = {
 };
 
 type AppState = "login" | "main" | "expired";
-type ActiveTab = "files" | "history" | "help" | "admin";
+type ActiveTab = "files" | "history" | "help" | "territories" | "admin";
 
 type Riddle = { id: number; question: string; answer: string; created_at?: string };
 type DbDocument = { id: number; folder_id: string; name: string; encrypted_name: string; file_type: string; created_at?: string; cdn_url?: string; fake_cdn_url?: string };
+type DbRecord = { id: number; name: string; successful_orders: number; created_at?: string };
+type Territory = { id: number; territory_number: number; territory_name: string; owner: string; control_level: number };
+type CleanupCode = { id: number; code: string; used: boolean; used_at?: string };
+type Order = { id: number; order_number: string; executor_name: string; executor_id: number; closed_at: string; reward: number; confirmed: boolean; location_territory: number; territory_name: string; cleanup_code_used?: string; code_valid?: boolean };
 
 function formatTimeMs(ms: number): string {
   if (ms <= 0) return "00:00:00";
@@ -125,8 +139,30 @@ export default function Index() {
   const [treeReveal, setTreeReveal] = useState(false); // true = items are animating in
   const [treeRevealKey, setTreeRevealKey] = useState(0);
 
+  // DB records, territories, orders
+  const [dbRecords, setDbRecords] = useState<DbRecord[]>([]);
+  const [dbTerritories, setDbTerritories] = useState<Territory[]>([]);
+  const [dbOrders, setDbOrders] = useState<Order[]>([]);
+  const [dbCleanupCodes, setDbCleanupCodes] = useState<CleanupCode[]>([]);
+
+  // Close order dialog
+  const [showCloseOrderDialog, setShowCloseOrderDialog] = useState(false);
+  const [orderForm, setOrderForm] = useState({ order_number: "", executor_id: "", closed_at: "", reward: "", confirmed: false, location_territory: "", cleanup_code: "" });
+  const [orderMsg, setOrderMsg] = useState("");
+  const [orderSubmitting, setOrderSubmitting] = useState(false);
+  const [territoryHint, setTerritoryHint] = useState("");
+
+  // Territories tab: per-row code inputs
+  const [territoryCodeInputs, setTerritoryCodeInputs] = useState<Record<number, string>>({});
+  const [territoryCodeMsgs, setTerritoryCodeMsgs] = useState<Record<number, string>>({});
+
   // Admin state
-  const [adminTab, setAdminTab] = useState<"riddles" | "docs">("riddles");
+  const [adminTab, setAdminTab] = useState<"riddles" | "docs" | "members" | "territories_admin" | "codes">("riddles");
+  const [newMemberName, setNewMemberName] = useState("");
+  const [newTerritory, setNewTerritory] = useState({ territory_number: "", territory_name: "", owner: "Пусто", control_level: "0" });
+  const [editTerritoryId, setEditTerritoryId] = useState<number | null>(null);
+  const [editTerritoryData, setEditTerritoryData] = useState<Partial<Territory>>({});
+  const [newCleanupCode, setNewCleanupCode] = useState("");
   const [newQuestion, setNewQuestion] = useState("");
   const [newAnswer, setNewAnswer] = useState("");
   const [adminMsg, setAdminMsg] = useState("");
@@ -160,15 +196,55 @@ export default function Index() {
     } catch (_e) { setDbDocuments([]); }
   };
 
+  const loadRecords = async () => {
+    try {
+      const r = await fetch(RECORDS_URL);
+      const data = await r.json();
+      const parsed = typeof data === "string" ? JSON.parse(data) : data;
+      setDbRecords(parsed.records || []);
+    } catch { setDbRecords([]); }
+  };
+
+  const loadTerritories = async () => {
+    try {
+      const r = await fetch(TERRITORIES_URL);
+      const data = await r.json();
+      const parsed = typeof data === "string" ? JSON.parse(data) : data;
+      setDbTerritories(parsed.territories || []);
+    } catch { setDbTerritories([]); }
+  };
+
+  const loadOrders = async () => {
+    try {
+      const r = await fetch(ORDERS_URL);
+      const data = await r.json();
+      const parsed = typeof data === "string" ? JSON.parse(data) : data;
+      setDbOrders(parsed.orders || []);
+    } catch { setDbOrders([]); }
+  };
+
+  const loadCleanupCodes = async () => {
+    try {
+      const r = await fetch(`${ORDERS_URL}?action=codes`);
+      const data = await r.json();
+      const parsed = typeof data === "string" ? JSON.parse(data) : data;
+      setDbCleanupCodes(parsed.codes || []);
+    } catch { setDbCleanupCodes([]); }
+  };
+
   useEffect(() => {
     if (appState === "main") {
       loadRiddles();
       loadDocuments();
+      loadRecords();
+      loadTerritories();
+      loadOrders();
     }
   }, [appState]);
 
   useEffect(() => {
     if (appState !== "main") return;
+    if (currentUser === ADMIN_LOGIN) return; // администратор — без ограничений
     timerRef.current = window.setInterval(() => {
       const left = sessionExpiry - Date.now();
       if (left <= 0) {
@@ -180,7 +256,6 @@ export default function Index() {
       } else {
         setTimeLeft(left);
         saveSession(currentUser, sessionExpiry);
-        // Предупреждение за 5 минут
         if (left <= WARN_THRESHOLD && !warnShown) {
           setWarnShown(true);
           setShowWarnDialog(true);
@@ -194,6 +269,17 @@ export default function Index() {
     const login = loginInput.trim().toLowerCase();
     if (!VALID_LOGINS.includes(login)) {
       setLoginError("Неверный логин. Доступ запрещён.");
+      return;
+    }
+    // Администратор — без блокировок и с бессрочной сессией
+    if (login === ADMIN_LOGIN) {
+      setCurrentUser(login);
+      setSessionExpiry(Date.now() + 999 * 24 * 60 * 60 * 1000);
+      setTimeLeft(999 * 24 * 60 * 60 * 1000);
+      setWarnShown(true);
+      setAppState("main");
+      setLoginError("");
+      addHistory(login, "login", "Вход администратора выполнен");
       return;
     }
     // Проверяем блокировку
@@ -344,6 +430,7 @@ export default function Index() {
   const formatTime = formatTimeMs;
 
   const allFiles = [
+    ...VIRTUAL_FILES,
     ...dbDocuments.map(d => ({
       id: `db_${d.id}`,
       folderId: d.folder_id,
@@ -351,7 +438,7 @@ export default function Index() {
       encrypted: d.encrypted_name,
       type: d.file_type,
       content: "",
-      isDb: true,
+      isDb: true as const,
       dbId: d.id,
       cdnUrl: d.cdn_url || null,
       fakeCdnUrl: d.fake_cdn_url || null,
@@ -392,7 +479,6 @@ export default function Index() {
   const handleFileClick = (fileId: string) => {
     const file = allFiles.find(f => f.id === fileId);
     setSelectedFile(fileId);
-    setFileDecrypted(false);
     setDecryptingFile(false);
     setEncryptingFile(false);
     setVisibleLines(0);
@@ -400,7 +486,14 @@ export default function Index() {
     setEncryptScan(0);
     if (decryptAnimRef.current) clearInterval(decryptAnimRef.current);
     if (encryptAnimRef.current) clearInterval(encryptAnimRef.current);
-    // Запускаем глитч-анимацию появления изображения или зашифрованного текста
+    // Виртуальные файлы (таблицы) всегда открыты
+    const isVirtual = fileId.startsWith("vf");
+    if (isVirtual) {
+      setFileDecrypted(true);
+      addHistory(currentUser, "action", `Открыт файл: ${file?.name}`);
+      return;
+    }
+    setFileDecrypted(false);
     const isImg = file ? ["png", "jpg", "jpeg"].includes(file.type) : false;
     if (isImg) setFakeImgKey(k => k + 1);
     else setEncTextKey(k => k + 1);
@@ -521,6 +614,69 @@ export default function Index() {
     } catch { setAdminMsg("Ошибка удаления"); }
   };
 
+  // Admin: add member to records
+  const handleAddMember = async () => {
+    if (!newMemberName.trim()) { setAdminMsg("Введите имя"); return; }
+    setAdminMsg("Добавляю...");
+    try {
+      const r = await fetch(RECORDS_URL, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ name: newMemberName.trim() }) });
+      const data = await r.json();
+      const parsed = typeof data === "string" ? JSON.parse(data) : data;
+      if (parsed.id) { setAdminMsg("Участник добавлен!"); setNewMemberName(""); loadRecords(); }
+      else setAdminMsg("Ошибка: " + (parsed.error || "неизвестно"));
+    } catch { setAdminMsg("Ошибка соединения"); }
+  };
+
+  const handleDeleteMember = async (id: number) => {
+    try { await fetch(`${RECORDS_URL}?id=${id}`, { method: "DELETE" }); setAdminMsg("Участник удалён"); loadRecords(); }
+    catch { setAdminMsg("Ошибка"); }
+  };
+
+  // Admin: territories
+  const handleAddTerritory = async () => {
+    if (!newTerritory.territory_number || !newTerritory.territory_name.trim()) { setAdminMsg("Введите номер и название"); return; }
+    setAdminMsg("Добавляю...");
+    try {
+      const r = await fetch(TERRITORIES_URL, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ territory_number: Number(newTerritory.territory_number), territory_name: newTerritory.territory_name.trim(), owner: newTerritory.owner, control_level: Number(newTerritory.control_level) }) });
+      const data = await r.json();
+      const parsed = typeof data === "string" ? JSON.parse(data) : data;
+      if (parsed.id) { setAdminMsg("Территория добавлена!"); setNewTerritory({ territory_number: "", territory_name: "", owner: "Пусто", control_level: "0" }); loadTerritories(); }
+      else setAdminMsg("Ошибка: " + (parsed.error || "неизвестно"));
+    } catch { setAdminMsg("Ошибка соединения"); }
+  };
+
+  const handleSaveTerritoryEdit = async (id: number) => {
+    try {
+      const r = await fetch(TERRITORIES_URL, { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id, ...editTerritoryData }) });
+      const data = await r.json();
+      const parsed = typeof data === "string" ? JSON.parse(data) : data;
+      if (parsed.id) { setEditTerritoryId(null); setEditTerritoryData({}); loadTerritories(); }
+    } catch { setAdminMsg("Ошибка сохранения"); }
+  };
+
+  const handleDeleteTerritory = async (id: number) => {
+    try { await fetch(`${TERRITORIES_URL}?id=${id}`, { method: "DELETE" }); setAdminMsg("Территория удалена"); loadTerritories(); }
+    catch { setAdminMsg("Ошибка"); }
+  };
+
+  // Admin: cleanup codes
+  const handleAddCleanupCode = async () => {
+    if (!newCleanupCode.trim()) { setAdminMsg("Введите код"); return; }
+    setAdminMsg("Добавляю...");
+    try {
+      const r = await fetch(`${ORDERS_URL}?action=add_code`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ code: newCleanupCode.trim() }) });
+      const data = await r.json();
+      const parsed = typeof data === "string" ? JSON.parse(data) : data;
+      if (parsed.id) { setAdminMsg("Код добавлен!"); setNewCleanupCode(""); loadCleanupCodes(); }
+      else setAdminMsg("Ошибка: " + (parsed.error || "неизвестно"));
+    } catch { setAdminMsg("Ошибка соединения"); }
+  };
+
+  const handleDeleteCleanupCode = async (id: number) => {
+    try { await fetch(`${ORDERS_URL}?action=del_code&id=${id}`, { method: "DELETE" }); setAdminMsg("Код удалён"); loadCleanupCodes(); }
+    catch { setAdminMsg("Ошибка"); }
+  };
+
   if (appState === "login") {
     return (
       <div className="w-screen h-screen bg-[#008080] flex items-center justify-center" style={{ fontFamily: "'Courier New', monospace" }}>
@@ -583,8 +739,8 @@ export default function Index() {
           </span>
         </div>
         <div className="flex items-center gap-2">
-          <div className={`text-[10px] px-2 py-0.5 font-bold border ${timeLeft < WARN_THRESHOLD ? "bg-red-800 text-white border-red-600 animate-pulse" : "bg-[#000060] text-[#00ff00] border-[#0000a0]"}`}>
-            ⏱ {formatTime(timeLeft)}
+          <div className={`text-[10px] px-2 py-0.5 font-bold border ${!isAdmin && timeLeft < WARN_THRESHOLD ? "bg-red-800 text-white border-red-600 animate-pulse" : "bg-[#000060] text-[#00ff00] border-[#0000a0]"}`}>
+            ⏱ {isAdmin ? "∞" : formatTime(timeLeft)}
           </div>
           <button className={btn("text-[10px] px-3")} onClick={handleLogout}>Выход</button>
         </div>
@@ -596,6 +752,7 @@ export default function Index() {
           { id: "files", label: "📁 Файлы" },
           { id: "history", label: "📋 История" },
           { id: "help", label: "❓ Справка" },
+          ...(isAdmin ? [{ id: "territories", label: "🗺 Территории" }] : []),
           ...(isAdmin ? [{ id: "admin", label: "⚙ Администратор" }] : []),
         ] as { id: ActiveTab; label: string }[]).map(tab => (
           <button
@@ -604,6 +761,7 @@ export default function Index() {
             onClick={() => {
               setActiveTab(tab.id);
               if (tab.id === "admin") { loadRiddles(); loadDocuments(); setAdminMsg(""); }
+              if (tab.id === "territories") { loadTerritories(); }
               addHistory(currentUser, "action", `Раздел: ${tab.label.replace(/^.{2}/, "").trim()}`);
             }}
           >
@@ -662,7 +820,7 @@ export default function Index() {
                   </div>
                 ))}
               </div>
-              <div className="bg-[#c0c0c0] border-t-2 border-t-white p-2">
+              <div className="bg-[#c0c0c0] border-t-2 border-t-white p-2 space-y-1">
                 {decrypted ? (
                   <button className={btn("w-full justify-center")} onClick={() => { setDecrypted(false); setFileDecrypted(false); addHistory(currentUser, "action", "Список зашифрован вручную"); }}>
                     🔒 Зашифровать
@@ -670,6 +828,14 @@ export default function Index() {
                 ) : (
                   <button className={btn("w-full justify-center")} onClick={() => openRiddle("files")}>
                     🔓 Расшифровать
+                  </button>
+                )}
+                {selectedFolder === "f5" && (
+                  <button
+                    className={btn("w-full justify-center text-[#800000] font-bold")}
+                    onClick={() => { setOrderMsg(""); setOrderForm({ order_number: "", executor_id: "", closed_at: "", reward: "", confirmed: false, location_territory: "", cleanup_code: "" }); setTerritoryHint(""); setShowCloseOrderDialog(true); }}
+                  >
+                    📋 Закрытие заказа
                   </button>
                 )}
               </div>
@@ -693,6 +859,81 @@ export default function Index() {
                   const isImage = ["png", "jpg", "jpeg"].includes(selectedFileData.type);
                   const rawContent = fileContents[selectedFileData.id] ?? null;
                   const imageData = rawContent ? (() => { try { const p = JSON.parse(rawContent); return p._image ? p : null; } catch { return null; } })() : null;
+
+                  // Виртуальные файлы — всегда открыты, рендерим сразу
+                  if (selectedFileData.type === "special_records") {
+                    return (
+                      <div className="h-full overflow-auto">
+                        <div className="text-xs font-bold border-b-2 border-[#808080] pb-1 mb-2 flex items-center justify-between">
+                          <span>🏆 Таблица рекордов</span>
+                          <button className={btn("text-[10px]")} onClick={loadRecords}>⟳</button>
+                        </div>
+                        <table className="w-full text-xs font-mono border-collapse">
+                          <thead>
+                            <tr className="bg-[#c0c0c0]">
+                              <th className="text-left px-2 py-1 border-b-2 border-b-[#808080] text-[10px] w-12">Место</th>
+                              <th className="text-left px-2 py-1 border-b-2 border-b-[#808080] text-[10px]">Участник</th>
+                              <th className="text-right px-2 py-1 border-b-2 border-b-[#808080] text-[10px] w-36">Успешные заказы</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {dbRecords.map((rec, idx) => (
+                              <tr key={rec.id} className={`border-b border-[#e0e0e0] ${idx % 2 === 0 ? "bg-white" : "bg-[#f8f8f8]"}`}>
+                                <td className="px-2 py-1 font-bold text-[#000080]">{idx + 1}</td>
+                                <td className="px-2 py-1">{rec.name}</td>
+                                <td className="px-2 py-1 text-right font-bold">{rec.successful_orders}</td>
+                              </tr>
+                            ))}
+                            {dbRecords.length === 0 && (
+                              <tr><td colSpan={3} className="px-2 py-4 text-[#808080] text-center text-[10px]">Нет данных — участники не добавлены</td></tr>
+                            )}
+                          </tbody>
+                        </table>
+                      </div>
+                    );
+                  }
+
+                  if (selectedFileData.type === "special_territories") {
+                    const ownerColor = (o: string) => ({ "Каморра": "text-red-800", "Русска Рома": "text-blue-800", "Триады": "text-yellow-700", "Бездомные": "text-green-800", "Пусто": "text-[#808080]" }[o] || "");
+                    return (
+                      <div className="h-full overflow-auto">
+                        <div className="text-xs font-bold border-b-2 border-[#808080] pb-1 mb-2 flex items-center justify-between">
+                          <span>🗺 Таблица территорий</span>
+                          <button className={btn("text-[10px]")} onClick={loadTerritories}>⟳</button>
+                        </div>
+                        <table className="w-full text-xs font-mono border-collapse">
+                          <thead>
+                            <tr className="bg-[#c0c0c0]">
+                              <th className="text-left px-2 py-1 border-b-2 border-b-[#808080] text-[10px] w-8">№</th>
+                              <th className="text-left px-2 py-1 border-b-2 border-b-[#808080] text-[10px]">Название</th>
+                              <th className="text-left px-2 py-1 border-b-2 border-b-[#808080] text-[10px] w-28">Владелец</th>
+                              <th className="text-center px-2 py-1 border-b-2 border-b-[#808080] text-[10px] w-32">Уровень контроля</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {dbTerritories.map((t, idx) => (
+                              <tr key={t.id} className={`border-b border-[#e0e0e0] ${idx % 2 === 0 ? "bg-white" : "bg-[#f8f8f8]"}`}>
+                                <td className="px-2 py-1 font-bold text-[#000080]">{t.territory_number}</td>
+                                <td className="px-2 py-1">{t.territory_name}</td>
+                                <td className={`px-2 py-1 font-bold ${ownerColor(t.owner)}`}>{t.owner}</td>
+                                <td className="px-2 py-1 text-center">
+                                  <span className="font-bold">{t.control_level}</span><span className="text-[9px] text-[#808080]">/5</span>
+                                  <div className="flex gap-0.5 justify-center mt-0.5">
+                                    {Array.from({length: 5}).map((_, i) => (
+                                      <div key={i} className={`w-3 h-2 border border-[#808080] ${i < t.control_level ? "bg-[#000080]" : "bg-white"}`} />
+                                    ))}
+                                  </div>
+                                </td>
+                              </tr>
+                            ))}
+                            {dbTerritories.length === 0 && (
+                              <tr><td colSpan={4} className="px-2 py-4 text-[#808080] text-center text-[10px]">Нет данных — территории не добавлены</td></tr>
+                            )}
+                          </tbody>
+                        </table>
+                      </div>
+                    );
+                  }
 
                   if (!fileDecrypted) {
                     // Зашифрованный вид: показываем .jpg (фейк) с глитч-анимацией
@@ -934,6 +1175,85 @@ export default function Index() {
           </div>
         )}
 
+        {activeTab === "territories" && isAdmin && (
+          <div className="flex-1 flex flex-col overflow-hidden">
+            <div className="bg-[#800000] px-2 py-0.5 text-white text-[10px] font-bold select-none flex items-center gap-2">
+              🗺 Администрирование территорий
+              <button className={btn("text-[10px] ml-auto")} onClick={loadTerritories}>⟳ Обновить</button>
+            </div>
+            <div className={inset() + " flex-1 overflow-auto"}>
+              <table className="w-full text-xs font-mono border-collapse">
+                <thead>
+                  <tr className="bg-[#c0c0c0]">
+                    <th className="text-left px-2 py-1 border-b-2 border-b-[#808080] text-[10px] w-8">№</th>
+                    <th className="text-left px-2 py-1 border-b-2 border-b-[#808080] text-[10px]">Название</th>
+                    <th className="text-left px-2 py-1 border-b-2 border-b-[#808080] text-[10px] w-24">Владелец</th>
+                    <th className="text-center px-2 py-1 border-b-2 border-b-[#808080] text-[10px] w-20">Контроль</th>
+                    <th className="text-left px-2 py-1 border-b-2 border-b-[#808080] text-[10px]">Код уборки → +1 контроль</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {dbTerritories.map((t, idx) => (
+                    <tr key={t.id} className={`border-b border-[#e0e0e0] ${idx % 2 === 0 ? "bg-white" : "bg-[#f8f8f8]"}`}>
+                      <td className="px-2 py-1 font-bold text-[#000080]">{t.territory_number}</td>
+                      <td className="px-2 py-1">{t.territory_name}</td>
+                      <td className="px-2 py-1 text-[10px]">{t.owner}</td>
+                      <td className="px-2 py-1 text-center">
+                        <span className="font-bold">{t.control_level}</span>/5
+                        <div className="flex gap-0.5 justify-center mt-0.5">
+                          {Array.from({length: 5}).map((_, i) => (
+                            <div key={i} className={`w-2.5 h-1.5 border border-[#808080] ${i < t.control_level ? "bg-[#000080]" : "bg-white"}`} />
+                          ))}
+                        </div>
+                      </td>
+                      <td className="px-2 py-1">
+                        <div className="flex gap-1 items-center">
+                          <input
+                            className="border border-[#808080] px-1 py-0.5 text-[10px] font-mono w-24 bg-white"
+                            value={territoryCodeInputs[t.id] || ""}
+                            onChange={e => setTerritoryCodeInputs(prev => ({...prev, [t.id]: e.target.value}))}
+                            placeholder="код..."
+                          />
+                          <button
+                            className={btn("text-[9px] px-2 py-0.5")}
+                            onClick={async () => {
+                              const code = (territoryCodeInputs[t.id] || "").trim();
+                              if (!code) { setTerritoryCodeMsgs(prev => ({...prev, [t.id]: "Введите код"})); return; }
+                              try {
+                                const r = await fetch(`${ORDERS_URL}?action=check&code=${encodeURIComponent(code)}`);
+                                const data = await r.json();
+                                const parsed = typeof data === "string" ? JSON.parse(data) : data;
+                                if (parsed.valid) {
+                                  await fetch(TERRITORIES_URL, { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id: t.id, control_delta: 1 }) });
+                                  setTerritoryCodeInputs(prev => ({...prev, [t.id]: ""}));
+                                  setTerritoryCodeMsgs(prev => ({...prev, [t.id]: "✓ +1 контроль"}));
+                                  loadTerritories();
+                                } else {
+                                  setTerritoryCodeMsgs(prev => ({...prev, [t.id]: "✗ Код недействителен"}));
+                                }
+                              } catch { setTerritoryCodeMsgs(prev => ({...prev, [t.id]: "✗ Ошибка"})); }
+                            }}
+                          >
+                            Применить
+                          </button>
+                          {territoryCodeMsgs[t.id] && (
+                            <span className={`text-[9px] ${territoryCodeMsgs[t.id].startsWith("✓") ? "text-green-700 font-bold" : "text-red-700"}`}>
+                              {territoryCodeMsgs[t.id]}
+                            </span>
+                          )}
+                        </div>
+                      </td>
+                    </tr>
+                  ))}
+                  {dbTerritories.length === 0 && (
+                    <tr><td colSpan={5} className="px-2 py-4 text-[#808080] text-center text-[10px]">Нет территорий</td></tr>
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        )}
+
         {activeTab === "admin" && isAdmin && (
           <div className="flex-1 flex flex-col">
             <div className="bg-[#800000] px-2 py-0.5 text-white text-[10px] font-bold select-none flex items-center gap-2">
@@ -942,7 +1262,7 @@ export default function Index() {
             </div>
 
             {/* Admin sub-tabs */}
-            <div className="bg-[#c0c0c0] border-b border-[#808080] px-1 py-0.5 flex gap-0.5 shrink-0">
+            <div className="bg-[#c0c0c0] border-b border-[#808080] px-1 py-0.5 flex gap-0.5 shrink-0 flex-wrap">
               <button
                 className={`text-xs px-3 py-0.5 ${adminTab === "riddles" ? "bg-[#800000] text-white" : "hover:bg-[#d4d0c8] text-black"}`}
                 onClick={() => setAdminTab("riddles")}
@@ -954,6 +1274,24 @@ export default function Index() {
                 onClick={() => setAdminTab("docs")}
               >
                 📄 Документы ({dbDocuments.length})
+              </button>
+              <button
+                className={`text-xs px-3 py-0.5 ${adminTab === "members" ? "bg-[#800000] text-white" : "hover:bg-[#d4d0c8] text-black"}`}
+                onClick={() => { setAdminTab("members"); loadRecords(); }}
+              >
+                👥 Участники ({dbRecords.length})
+              </button>
+              <button
+                className={`text-xs px-3 py-0.5 ${adminTab === "territories_admin" ? "bg-[#800000] text-white" : "hover:bg-[#d4d0c8] text-black"}`}
+                onClick={() => { setAdminTab("territories_admin"); loadTerritories(); }}
+              >
+                🗺 Территории
+              </button>
+              <button
+                className={`text-xs px-3 py-0.5 ${adminTab === "codes" ? "bg-[#800000] text-white" : "hover:bg-[#d4d0c8] text-black"}`}
+                onClick={() => { setAdminTab("codes"); loadCleanupCodes(); }}
+              >
+                🔑 Коды уборки
               </button>
             </div>
 
@@ -1143,6 +1481,190 @@ export default function Index() {
                   </div>
                 </>
               )}
+
+              {adminTab === "members" && (
+                <>
+                  <div className="flex flex-col w-72 shrink-0 p-2">
+                    <div className="bg-[#c0c0c0] border-2 border-t-white border-l-white border-b-[#808080] border-r-[#808080] p-3 space-y-2">
+                      <div className="text-xs font-bold border-b border-[#808080] pb-1 mb-2">➕ Добавить участника</div>
+                      <div>
+                        <label className="text-[10px] font-bold block mb-1">Имя участника:</label>
+                        <input className={inset("w-full px-2 py-1.5 text-xs")} value={newMemberName} onChange={e => setNewMemberName(e.target.value)} placeholder="Введите имя..." onKeyDown={e => e.key === "Enter" && handleAddMember()} />
+                      </div>
+                      <button className={btn("w-full justify-center")} onClick={handleAddMember}>Добавить участника</button>
+                      {adminMsg && <div className={`text-[10px] px-2 py-1 border ${adminMsg.includes("Ошибка") ? "border-red-400 bg-red-50 text-red-800" : "border-green-400 bg-green-50 text-green-800"}`}>{adminMsg}</div>}
+                    </div>
+                  </div>
+                  <div className="flex-1 flex flex-col p-2 pl-0">
+                    <div className={inset() + " flex-1 overflow-auto"}>
+                      <table className="w-full text-xs font-mono border-collapse">
+                        <thead>
+                          <tr className="bg-[#c0c0c0]">
+                            <th className="text-left px-2 py-1 border-b-2 border-b-[#808080] text-[10px] w-8">#</th>
+                            <th className="text-left px-2 py-1 border-b-2 border-b-[#808080] text-[10px]">Участник</th>
+                            <th className="text-right px-2 py-1 border-b-2 border-b-[#808080] text-[10px] w-28">Успешные заказы</th>
+                            <th className="px-2 py-1 border-b-2 border-b-[#808080] text-[10px] w-16">Удалить</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {dbRecords.map((rec, i) => (
+                            <tr key={rec.id} className={`border-b border-[#e0e0e0] ${i % 2 === 0 ? "bg-white" : "bg-[#f8f8f8]"}`}>
+                              <td className="px-2 py-1 text-[#808080] text-[10px]">{i + 1}</td>
+                              <td className="px-2 py-1 font-bold">{rec.name}</td>
+                              <td className="px-2 py-1 text-right">{rec.successful_orders}</td>
+                              <td className="px-2 py-1 text-center">
+                                <button className={btn("text-[10px] px-2 py-0.5 text-red-800 hover:bg-red-100")} onClick={() => handleDeleteMember(rec.id)}>✕</button>
+                              </td>
+                            </tr>
+                          ))}
+                          {dbRecords.length === 0 && <tr><td colSpan={4} className="px-2 py-4 text-[#808080] text-center text-[10px]">Нет участников</td></tr>}
+                        </tbody>
+                      </table>
+                    </div>
+                    <div className="bg-[#c0c0c0] border-t-2 border-t-white p-2 flex justify-between items-center">
+                      <span className="text-[10px] text-[#808080]">Участников: {dbRecords.length}</span>
+                      <button className={btn("text-[10px]")} onClick={loadRecords}>⟳ Обновить</button>
+                    </div>
+                  </div>
+                </>
+              )}
+
+              {adminTab === "territories_admin" && (
+                <>
+                  <div className="flex flex-col w-80 shrink-0 p-2">
+                    <div className="bg-[#c0c0c0] border-2 border-t-white border-l-white border-b-[#808080] border-r-[#808080] p-3 space-y-2">
+                      <div className="text-xs font-bold border-b border-[#808080] pb-1 mb-2">➕ Добавить территорию</div>
+                      <div>
+                        <label className="text-[10px] font-bold block mb-1">Номер территории:</label>
+                        <input type="number" min={1} className={inset("w-full px-2 py-1.5 text-xs")} value={newTerritory.territory_number} onChange={e => setNewTerritory(t => ({...t, territory_number: e.target.value}))} placeholder="1" />
+                      </div>
+                      <div>
+                        <label className="text-[10px] font-bold block mb-1">Название:</label>
+                        <input className={inset("w-full px-2 py-1.5 text-xs")} value={newTerritory.territory_name} onChange={e => setNewTerritory(t => ({...t, territory_name: e.target.value}))} placeholder="Название территории..." />
+                      </div>
+                      <div>
+                        <label className="text-[10px] font-bold block mb-1">Владелец:</label>
+                        <select className={inset("w-full px-2 py-1.5 text-xs")} value={newTerritory.owner} onChange={e => setNewTerritory(t => ({...t, owner: e.target.value}))}>
+                          {["Каморра","Русска Рома","Триады","Бездомные","Пусто"].map(o => <option key={o} value={o}>{o}</option>)}
+                        </select>
+                      </div>
+                      <div>
+                        <label className="text-[10px] font-bold block mb-1">Уровень контроля (0-5):</label>
+                        <input type="number" min={0} max={5} className={inset("w-full px-2 py-1.5 text-xs")} value={newTerritory.control_level} onChange={e => setNewTerritory(t => ({...t, control_level: e.target.value}))} />
+                      </div>
+                      <button className={btn("w-full justify-center")} onClick={handleAddTerritory}>Добавить территорию</button>
+                      {adminMsg && <div className={`text-[10px] px-2 py-1 border ${adminMsg.includes("Ошибка") ? "border-red-400 bg-red-50 text-red-800" : "border-green-400 bg-green-50 text-green-800"}`}>{adminMsg}</div>}
+                    </div>
+                  </div>
+                  <div className="flex-1 flex flex-col p-2 pl-0">
+                    <div className={inset() + " flex-1 overflow-auto"}>
+                      <table className="w-full text-xs font-mono border-collapse">
+                        <thead>
+                          <tr className="bg-[#c0c0c0]">
+                            <th className="text-left px-2 py-1 border-b-2 border-b-[#808080] text-[10px] w-8">№</th>
+                            <th className="text-left px-2 py-1 border-b-2 border-b-[#808080] text-[10px]">Название</th>
+                            <th className="text-left px-2 py-1 border-b-2 border-b-[#808080] text-[10px] w-24">Владелец</th>
+                            <th className="text-center px-2 py-1 border-b-2 border-b-[#808080] text-[10px] w-24">Контроль</th>
+                            <th className="text-center px-2 py-1 border-b-2 border-b-[#808080] text-[10px] w-16">Ред.</th>
+                            <th className="text-center px-2 py-1 border-b-2 border-b-[#808080] text-[10px] w-16">Удал.</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {dbTerritories.map((t, i) => (
+                            <tr key={t.id} className={`border-b border-[#e0e0e0] ${i % 2 === 0 ? "bg-white" : "bg-[#f8f8f8]"}`}>
+                              <td className="px-2 py-1 font-bold text-[#000080]">{t.territory_number}</td>
+                              <td className="px-2 py-1">
+                                {editTerritoryId === t.id ? (
+                                  <input className="border border-[#808080] px-1 py-0.5 text-[10px] w-full bg-white" value={editTerritoryData.territory_name ?? t.territory_name} onChange={e => setEditTerritoryData(d => ({...d, territory_name: e.target.value}))} />
+                                ) : t.territory_name}
+                              </td>
+                              <td className="px-2 py-1">
+                                {editTerritoryId === t.id ? (
+                                  <select className="border border-[#808080] px-1 py-0.5 text-[10px] bg-white" value={editTerritoryData.owner ?? t.owner} onChange={e => setEditTerritoryData(d => ({...d, owner: e.target.value}))}>
+                                    {["Каморра","Русска Рома","Триады","Бездомные","Пусто"].map(o => <option key={o} value={o}>{o}</option>)}
+                                  </select>
+                                ) : t.owner}
+                              </td>
+                              <td className="px-2 py-1 text-center">
+                                {editTerritoryId === t.id ? (
+                                  <input type="number" min={0} max={5} className="border border-[#808080] px-1 py-0.5 text-[10px] w-12 text-center bg-white" value={editTerritoryData.control_level ?? t.control_level} onChange={e => setEditTerritoryData(d => ({...d, control_level: Number(e.target.value)}))} />
+                                ) : <><span className="font-bold">{t.control_level}</span>/5</>}
+                              </td>
+                              <td className="px-2 py-1 text-center">
+                                {editTerritoryId === t.id ? (
+                                  <button className={btn("text-[9px] px-1.5 text-green-800")} onClick={() => handleSaveTerritoryEdit(t.id)}>✓</button>
+                                ) : (
+                                  <button className={btn("text-[9px] px-1.5")} onClick={() => { setEditTerritoryId(t.id); setEditTerritoryData({}); }}>✎</button>
+                                )}
+                              </td>
+                              <td className="px-2 py-1 text-center">
+                                <button className={btn("text-[10px] px-2 py-0.5 text-red-800 hover:bg-red-100")} onClick={() => handleDeleteTerritory(t.id)}>✕</button>
+                              </td>
+                            </tr>
+                          ))}
+                          {dbTerritories.length === 0 && <tr><td colSpan={6} className="px-2 py-4 text-[#808080] text-center text-[10px]">Нет территорий</td></tr>}
+                        </tbody>
+                      </table>
+                    </div>
+                    <div className="bg-[#c0c0c0] border-t-2 border-t-white p-2 flex justify-between items-center">
+                      <span className="text-[10px] text-[#808080]">Территорий: {dbTerritories.length}</span>
+                      <button className={btn("text-[10px]")} onClick={loadTerritories}>⟳ Обновить</button>
+                    </div>
+                  </div>
+                </>
+              )}
+
+              {adminTab === "codes" && (
+                <>
+                  <div className="flex flex-col w-72 shrink-0 p-2">
+                    <div className="bg-[#c0c0c0] border-2 border-t-white border-l-white border-b-[#808080] border-r-[#808080] p-3 space-y-2">
+                      <div className="text-xs font-bold border-b border-[#808080] pb-1 mb-2">🔑 Добавить код уборки</div>
+                      <div className="text-[9px] text-[#808080]">Каждый код — одноразовый. Действующий код при закрытии заказа сохраняет уровень контроля территории. Просроченный/пустой/неверный — снижает на 1.</div>
+                      <div>
+                        <label className="text-[10px] font-bold block mb-1">Код:</label>
+                        <input className={inset("w-full px-2 py-1.5 text-xs font-mono")} value={newCleanupCode} onChange={e => setNewCleanupCode(e.target.value)} placeholder="Введите уникальный код..." onKeyDown={e => e.key === "Enter" && handleAddCleanupCode()} />
+                      </div>
+                      <button className={btn("w-full justify-center")} onClick={handleAddCleanupCode}>Добавить код</button>
+                      {adminMsg && <div className={`text-[10px] px-2 py-1 border ${adminMsg.includes("Ошибка") ? "border-red-400 bg-red-50 text-red-800" : "border-green-400 bg-green-50 text-green-800"}`}>{adminMsg}</div>}
+                    </div>
+                  </div>
+                  <div className="flex-1 flex flex-col p-2 pl-0">
+                    <div className={inset() + " flex-1 overflow-auto"}>
+                      <table className="w-full text-xs font-mono border-collapse">
+                        <thead>
+                          <tr className="bg-[#c0c0c0]">
+                            <th className="text-left px-2 py-1 border-b-2 border-b-[#808080] text-[10px]">Код</th>
+                            <th className="text-center px-2 py-1 border-b-2 border-b-[#808080] text-[10px] w-20">Статус</th>
+                            <th className="text-left px-2 py-1 border-b-2 border-b-[#808080] text-[10px] w-36">Использован</th>
+                            <th className="text-center px-2 py-1 border-b-2 border-b-[#808080] text-[10px] w-16">Удалить</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {dbCleanupCodes.map((c, i) => (
+                            <tr key={c.id} className={`border-b border-[#e0e0e0] ${i % 2 === 0 ? "bg-white" : "bg-[#f8f8f8]"}`}>
+                              <td className="px-2 py-1 font-mono font-bold">{c.code}</td>
+                              <td className="px-2 py-1 text-center">
+                                {c.used
+                                  ? <span className="text-[9px] text-red-800 font-bold border border-red-300 bg-red-50 px-1">ИСПОЛЬЗОВАН</span>
+                                  : <span className="text-[9px] text-green-800 font-bold border border-green-300 bg-green-50 px-1">АКТИВЕН</span>}
+                              </td>
+                              <td className="px-2 py-1 text-[9px] text-[#808080]">{c.used_at ? new Date(c.used_at).toLocaleString("ru-RU") : "—"}</td>
+                              <td className="px-2 py-1 text-center">
+                                <button className={btn("text-[10px] px-2 py-0.5 text-red-800 hover:bg-red-100")} onClick={() => handleDeleteCleanupCode(c.id)}>✕</button>
+                              </td>
+                            </tr>
+                          ))}
+                          {dbCleanupCodes.length === 0 && <tr><td colSpan={4} className="px-2 py-4 text-[#808080] text-center text-[10px]">Нет кодов</td></tr>}
+                        </tbody>
+                      </table>
+                    </div>
+                    <div className="bg-[#c0c0c0] border-t-2 border-t-white p-2 flex justify-between items-center">
+                      <span className="text-[10px] text-[#808080]">Кодов: {dbCleanupCodes.length} (активных: {dbCleanupCodes.filter(c => !c.used).length})</span>
+                      <button className={btn("text-[10px]")} onClick={loadCleanupCodes}>⟳ Обновить</button>
+                    </div>
+                  </div>
+                </>
+              )}
             </div>
           </div>
         )}
@@ -1249,6 +1771,123 @@ export default function Index() {
               <button className={btn("w-full text-center justify-center")} onClick={() => handleLogout(true)}>
                 Вернуться к авторизации
               </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Close Order Dialog */}
+      {showCloseOrderDialog && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
+          <div className="bg-[#c0c0c0] border-2 border-t-white border-l-white border-b-[#808080] border-r-[#808080] w-[480px] max-h-[90vh] overflow-auto shadow-[6px_6px_12px_rgba(0,0,0,0.6)]">
+            <div className="bg-[#000080] px-2 py-1 flex items-center justify-between select-none">
+              <span className="text-white text-xs font-bold">📋 Закрытие заказа</span>
+              <button className={btn("text-[10px] px-1.5 py-0 h-4 flex items-center")} onClick={() => setShowCloseOrderDialog(false)}>✕</button>
+            </div>
+            <div className="p-4 space-y-2">
+              <div>
+                <label className="text-[10px] font-bold block mb-0.5">Номер заказа:</label>
+                <input className={inset("w-full px-2 py-1.5 text-xs")} value={orderForm.order_number} onChange={e => setOrderForm(f => ({...f, order_number: e.target.value}))} placeholder="Введите номер заказа..." />
+              </div>
+              <div>
+                <label className="text-[10px] font-bold block mb-0.5">Исполнитель:</label>
+                <select className={inset("w-full px-2 py-1.5 text-xs")} value={orderForm.executor_id} onChange={e => setOrderForm(f => ({...f, executor_id: e.target.value}))}>
+                  <option value="">— выберите участника —</option>
+                  {dbRecords.map(r => <option key={r.id} value={r.id}>{r.name}</option>)}
+                </select>
+              </div>
+              <div>
+                <label className="text-[10px] font-bold block mb-0.5">Дата закрытия:</label>
+                <input type="date" className={inset("w-full px-2 py-1.5 text-xs")} value={orderForm.closed_at} onChange={e => setOrderForm(f => ({...f, closed_at: e.target.value}))} />
+              </div>
+              <div>
+                <label className="text-[10px] font-bold block mb-0.5">Награда (монеты):</label>
+                <input type="number" min={0} className={inset("w-full px-2 py-1.5 text-xs")} value={orderForm.reward} onChange={e => setOrderForm(f => ({...f, reward: e.target.value}))} placeholder="0" />
+              </div>
+              <div>
+                <label className="text-[10px] font-bold block mb-0.5">Подтверждение устранения:</label>
+                <select className={inset("w-full px-2 py-1.5 text-xs")} value={orderForm.confirmed ? "yes" : "no"} onChange={e => setOrderForm(f => ({...f, confirmed: e.target.value === "yes"}))}>
+                  <option value="no">Нет</option>
+                  <option value="yes">Да (+1 к успешным заказам исполнителя)</option>
+                </select>
+              </div>
+              <div>
+                <label className="text-[10px] font-bold block mb-0.5">Локация устранения (номер территории):</label>
+                <input
+                  type="number" min={1}
+                  className={inset("w-full px-2 py-1.5 text-xs")}
+                  value={orderForm.location_territory}
+                  onChange={e => {
+                    const num = e.target.value;
+                    setOrderForm(f => ({...f, location_territory: num}));
+                    const t = dbTerritories.find(t => String(t.territory_number) === String(num));
+                    setTerritoryHint(t ? t.territory_name : (num ? "Территория не найдена" : ""));
+                  }}
+                  placeholder="Введите номер территории..."
+                />
+                {territoryHint && (
+                  <div className={`text-[10px] mt-0.5 px-1 ${territoryHint === "Территория не найдена" ? "text-red-700" : "text-[#000080] font-bold"}`}>
+                    {territoryHint === "Территория не найдена" ? "⚠ " : "📍 "}{territoryHint}
+                  </div>
+                )}
+              </div>
+              <div>
+                <label className="text-[10px] font-bold block mb-0.5">Код уборки <span className="text-[#808080] font-normal">(необязательно)</span>:</label>
+                <input className={inset("w-full px-2 py-1.5 text-xs font-mono")} value={orderForm.cleanup_code} onChange={e => setOrderForm(f => ({...f, cleanup_code: e.target.value}))} placeholder="Введите одноразовый код или оставьте пустым..." />
+                <div className="text-[9px] text-[#808080] mt-0.5">Неверный/использованный/пустой код снизит уровень контроля территории на 1</div>
+              </div>
+              {orderMsg && (
+                <div className={`text-[10px] px-2 py-1.5 border ${orderMsg.includes("Ошибка") || orderMsg.includes("ошибка") ? "border-red-400 bg-red-50 text-red-800" : "border-green-400 bg-green-50 text-green-800"}`}>
+                  {orderMsg}
+                </div>
+              )}
+              <div className="flex gap-2 justify-center pt-1">
+                <button
+                  className={btn(`px-8 ${orderSubmitting ? "opacity-50" : ""}`)}
+                  disabled={orderSubmitting}
+                  onClick={async () => {
+                    if (!orderForm.order_number.trim() || !orderForm.executor_id || !orderForm.closed_at || !orderForm.location_territory) {
+                      setOrderMsg("Ошибка: заполните все обязательные поля");
+                      return;
+                    }
+                    setOrderSubmitting(true);
+                    setOrderMsg("Сохраняю...");
+                    try {
+                      const r = await fetch(ORDERS_URL, {
+                        method: "POST",
+                        headers: { "Content-Type": "application/json" },
+                        body: JSON.stringify({
+                          order_number: orderForm.order_number.trim(),
+                          executor_id: Number(orderForm.executor_id),
+                          closed_at: orderForm.closed_at,
+                          reward: Number(orderForm.reward) || 0,
+                          confirmed: orderForm.confirmed,
+                          location_territory: Number(orderForm.location_territory),
+                          cleanup_code: orderForm.cleanup_code.trim(),
+                        }),
+                      });
+                      const data = await r.json();
+                      const parsed = typeof data === "string" ? JSON.parse(data) : data;
+                      if (parsed.id) {
+                        const codeStr = orderForm.cleanup_code.trim();
+                        const codeMsg = codeStr
+                          ? (parsed.code_valid ? " Код уборки принят ✓" : " Код уборки недействителен — контроль снижен на 1 ✗")
+                          : " Код не введён — контроль снижен на 1";
+                        setOrderMsg(`Заказ #${orderForm.order_number} закрыт!${codeMsg}`);
+                        loadOrders();
+                        loadRecords();
+                        loadTerritories();
+                      } else {
+                        setOrderMsg("Ошибка: " + (parsed.error || "неизвестно"));
+                      }
+                    } catch { setOrderMsg("Ошибка соединения"); }
+                    setOrderSubmitting(false);
+                  }}
+                >
+                  Подтвердить закрытие
+                </button>
+                <button className={btn("px-4")} onClick={() => setShowCloseOrderDialog(false)}>Отмена</button>
+              </div>
             </div>
           </div>
         </div>

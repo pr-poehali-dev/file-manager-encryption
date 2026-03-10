@@ -1,0 +1,241 @@
+import { useEffect, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
+import { Card, CardContent } from '@/components/ui/card';
+import Icon from '@/components/ui/icon';
+import TrashHeader from '@/components/photobank-trash/TrashHeader';
+import TrashedFoldersList from '@/components/photobank-trash/TrashedFoldersList';
+import TrashedPhotosGrid from '@/components/photobank-trash/TrashedPhotosGrid';
+import MobileNavigation from '@/components/layout/MobileNavigation';
+import { getAuthUserId, formatDate, getDaysLeftBadge, getDaysLeft } from '@/components/photobank-trash/utils';
+import { useTrashApi } from '@/components/photobank-trash/useTrashApi';
+
+const PhotoBankTrash = () => {
+  const navigate = useNavigate();
+  const userId = getAuthUserId();
+  const [authChecking, setAuthChecking] = useState(true);
+  const [selectedPhotoIds, setSelectedPhotoIds] = useState<Set<number>>(new Set());
+  const [selectionMode, setSelectionMode] = useState(false);
+  const [searchQuery, setSearchQuery] = useState('');
+  const [sortBy, setSortBy] = useState<'date' | 'name' | 'size'>('date');
+  const [filterCritical, setFilterCritical] = useState(false);
+
+  const {
+    trashedFolders,
+    trashedPhotos,
+    loading,
+    restoring,
+    deleting,
+    autoCleanupInProgress,
+    expiredCount,
+    fetchTrash,
+    handleRestore,
+    handleRestorePhoto,
+    handleDeletePhotoForever,
+    handleBulkRestore,
+    handleBulkDelete,
+    handleEmptyTrash,
+    cleanup
+  } = useTrashApi(userId);
+
+  useEffect(() => {
+    const checkAuth = () => {
+      const authSession = localStorage.getItem('authSession');
+      const vkUser = localStorage.getItem('vk_user');
+      const googleUser = localStorage.getItem('google_user');
+      
+      if (!authSession && !vkUser && !googleUser) {
+        navigate('/');
+        return;
+      }
+      
+      if (authSession) {
+        try {
+          const session = JSON.parse(authSession);
+          if (!session.userId) {
+            navigate('/');
+            return;
+          }
+        } catch {
+          navigate('/');
+          return;
+        }
+      }
+      
+      if (vkUser) {
+        try {
+          const userData = JSON.parse(vkUser);
+          if (!userData.user_id && !userData.vk_id) {
+            navigate('/');
+            return;
+          }
+        } catch {
+          navigate('/');
+          return;
+        }
+      }
+      
+      setAuthChecking(false);
+    };
+    
+    checkAuth();
+    
+    // Cleanup on unmount
+    return () => {
+      cleanup();
+    };
+  }, [navigate, cleanup]);
+
+  const togglePhotoSelection = (photoId: number) => {
+    setSelectedPhotoIds(prev => {
+      const newSet = new Set(prev);
+      if (newSet.has(photoId)) {
+        newSet.delete(photoId);
+      } else {
+        newSet.add(photoId);
+      }
+      return newSet;
+    });
+  };
+  
+  const selectAllPhotos = () => {
+    setSelectedPhotoIds(new Set(filteredAndSortedPhotos.map(p => p.id)));
+  };
+  
+  const deselectAllPhotos = () => {
+    setSelectedPhotoIds(new Set());
+  };
+
+  const onBulkRestore = async () => {
+    await handleBulkRestore(selectedPhotoIds);
+    setSelectedPhotoIds(new Set());
+    setSelectionMode(false);
+  };
+
+  const onBulkDelete = async () => {
+    await handleBulkDelete(selectedPhotoIds);
+    setSelectedPhotoIds(new Set());
+    setSelectionMode(false);
+  };
+
+  const filteredAndSortedPhotos = trashedPhotos
+    .filter(photo => {
+      if (searchQuery && !photo.file_name.toLowerCase().includes(searchQuery.toLowerCase())) {
+        return false;
+      }
+      if (filterCritical && getDaysLeft(photo.trashed_at) > 2) {
+        return false;
+      }
+      return true;
+    })
+    .sort((a, b) => {
+      if (sortBy === 'date') {
+        return new Date(b.trashed_at).getTime() - new Date(a.trashed_at).getTime();
+      } else if (sortBy === 'name') {
+        return a.file_name.localeCompare(b.file_name);
+      } else if (sortBy === 'size') {
+        return (b.file_size || 0) - (a.file_size || 0);
+      }
+      return 0;
+    });
+
+  useEffect(() => {
+    if (!authChecking && userId) {
+      fetchTrash();
+    }
+  }, [authChecking, userId]);
+  
+  if (authChecking || !userId) {
+    return (
+      <div className="min-h-screen bg-background flex items-center justify-center">
+        <div className="text-center space-y-4">
+          <div className="w-16 h-16 border-4 border-primary border-t-transparent rounded-full animate-spin mx-auto"></div>
+          <p className="text-muted-foreground">Проверка авторизации...</p>
+        </div>
+      </div>
+    );
+  }
+  
+  return (
+    <div className="min-h-screen bg-background p-6">
+      <div className="max-w-7xl mx-auto space-y-6">
+        <TrashHeader 
+          hasFolders={trashedFolders.length > 0}
+          hasPhotos={trashedPhotos.length > 0}
+          loading={loading}
+          onEmptyTrash={handleEmptyTrash}
+        />
+        
+        {autoCleanupInProgress && (
+          <Card className="bg-blue-50 dark:bg-blue-950/20 border-blue-200 dark:border-blue-800">
+            <CardContent className="pt-6">
+              <div className="flex items-center gap-3">
+                <Icon name="Loader2" size={20} className="text-blue-600 dark:text-blue-400 animate-spin shrink-0" />
+                <div className="text-sm flex-1">
+                  <p className="font-medium text-blue-900 dark:text-blue-100">Идет автоочистка просроченных файлов...</p>
+                  <p className="text-blue-700 dark:text-blue-300 text-xs mt-0.5">
+                    {expiredCount.folders > 0 && `${expiredCount.folders} пап${expiredCount.folders === 1 ? 'ка' : expiredCount.folders < 5 ? 'ки' : 'ок'}`}
+                    {expiredCount.folders > 0 && expiredCount.photos > 0 && ' и '}
+                    {expiredCount.photos > 0 && `${expiredCount.photos} фото`}
+                  </p>
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+        )}
+        
+        <TrashedFoldersList
+          folders={trashedFolders}
+          loading={loading}
+          restoring={restoring}
+          onRestore={handleRestore}
+          getDaysLeftBadge={getDaysLeftBadge}
+          formatDate={formatDate}
+        />
+        
+        <TrashedPhotosGrid
+          photos={trashedPhotos}
+          filteredAndSortedPhotos={filteredAndSortedPhotos}
+          loading={loading}
+          restoring={restoring}
+          deleting={deleting}
+          selectionMode={selectionMode}
+          selectedPhotoIds={selectedPhotoIds}
+          searchQuery={searchQuery}
+          sortBy={sortBy}
+          filterCritical={filterCritical}
+          onRestorePhoto={handleRestorePhoto}
+          onDeletePhotoForever={handleDeletePhotoForever}
+          onBulkRestore={onBulkRestore}
+          onBulkDelete={onBulkDelete}
+          onToggleSelection={togglePhotoSelection}
+          onSelectAll={selectAllPhotos}
+          onDeselectAll={deselectAllPhotos}
+          setSelectionMode={setSelectionMode}
+          setSelectedPhotoIds={setSelectedPhotoIds}
+          setSearchQuery={setSearchQuery}
+          setSortBy={setSortBy}
+          setFilterCritical={setFilterCritical}
+          getDaysLeftBadge={getDaysLeftBadge}
+          formatDate={formatDate}
+        />
+        
+        <Card className="bg-muted/30">
+          <CardContent className="pt-6">
+            <div className="flex items-start gap-3">
+              <Icon name="Info" size={20} className="text-muted-foreground shrink-0 mt-0.5" />
+              <div className="text-sm text-muted-foreground">
+                <p className="font-medium mb-1">О корзине</p>
+                <p>Файлы в корзине автоматически удаляются через 7 дней.</p>
+                <p className="mt-1">Вы можете восстановить папки и фото до истечения этого срока.</p>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+      </div>
+      
+      <MobileNavigation />
+    </div>
+  );
+};
+
+export default PhotoBankTrash;

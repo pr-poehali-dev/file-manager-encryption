@@ -1,0 +1,167 @@
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { Button } from '@/components/ui/button';
+import { Textarea } from '@/components/ui/textarea';
+import Icon from '@/components/ui/icon';
+import { Project, Payment, Comment, Refund } from '@/components/clients/ClientsTypes';
+import { useEffect, useState } from 'react';
+
+interface ClientDetailOverviewProps {
+  projects: Project[];
+  payments: Payment[];
+  refunds: Refund[];
+  comments: Comment[];
+  newComment: string;
+  setNewComment: (comment: string) => void;
+  handleAddComment: () => void;
+  handleDeleteComment: (commentId: number) => void;
+  formatDateTime: (dateString: string) => string;
+}
+
+const ClientDetailOverview = ({
+  projects,
+  payments,
+  refunds,
+  comments,
+  newComment,
+  setNewComment,
+  handleAddComment,
+  handleDeleteComment,
+  formatDateTime,
+}: ClientDetailOverviewProps) => {
+  const totalBudget = projects.reduce((sum, p) => sum + p.budget, 0);
+  const completedPayments = payments.filter(p => p.status === 'completed');
+  const totalPaid = completedPayments.reduce((sum, p) => sum + p.amount, 0);
+  const completedRefunds = refunds.filter(r => r.status === 'completed');
+  const totalRefunded = completedRefunds.reduce((sum, r) => sum + r.amount, 0);
+  const netPaid = totalPaid - totalRefunded;
+  const totalRemaining = totalBudget - netPaid;
+
+  const [animateKey, setAnimateKey] = useState(0);
+
+  useEffect(() => {
+    setAnimateKey(prev => prev + 1);
+  }, [totalPaid, totalRemaining, totalRefunded]);
+
+  useEffect(() => {
+    const handleFocus = (e: FocusEvent) => {
+      const target = e.target as HTMLElement;
+      if (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA') {
+        setTimeout(() => {
+          target.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        }, 300);
+      }
+    };
+
+    document.addEventListener('focusin', handleFocus);
+    return () => document.removeEventListener('focusin', handleFocus);
+  }, []);
+
+  return (
+    <>
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 sm:gap-4">
+        <Card>
+          <CardHeader className="pb-2 sm:pb-3">
+            <CardTitle className="text-xs sm:text-sm font-bold text-foreground flex items-center gap-2">Общий бюджет</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div className="text-xl sm:text-2xl font-bold text-red-600">
+              <span key={`budget-${animateKey}`} className="inline-block animate-in fade-in duration-300">{totalBudget.toLocaleString('ru-RU')} ₽</span>
+            </div>
+            <p className="text-xs text-muted-foreground mt-1">
+              Проектов: {projects.length}
+            </p>
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader className="pb-2 sm:pb-3">
+            <CardTitle className="text-xs sm:text-sm font-medium text-foreground flex items-center gap-2">Оплачено с учетом аванса</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div className="text-xl sm:text-2xl font-bold text-foreground">
+              <span key={`paid-${animateKey}`} className="inline-block animate-in fade-in zoom-in-50 duration-500">{netPaid.toLocaleString('ru-RU')} ₽</span>
+            </div>
+            <p className="text-xs text-muted-foreground mt-1">
+              Платежей: {completedPayments.length}
+              {totalRefunded > 0 && (
+                <span className="text-orange-600"> (возвраты: −{totalRefunded.toLocaleString('ru-RU')} ₽)</span>
+              )}
+            </p>
+          </CardContent>
+        </Card>
+
+        <Card className="sm:col-span-2 lg:col-span-1">
+          <CardHeader className="pb-2 sm:pb-3">
+            <CardTitle className="text-xs sm:text-sm font-medium text-foreground flex items-center gap-2">Остаток суммы за все услуги</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div className="text-xl sm:text-2xl font-bold text-foreground">
+              <span key={`remaining-${animateKey}`} className="inline-block animate-in fade-in zoom-in-50 duration-500">{totalRemaining.toLocaleString('ru-RU')} ₽</span>
+            </div>
+            <p className="text-xs text-muted-foreground mt-1">
+              К оплате от общего бюджета
+            </p>
+          </CardContent>
+        </Card>
+      </div>
+
+      <Card>
+        <CardHeader>
+          <CardTitle className="flex items-center justify-between">
+            <span className="flex items-center gap-2">
+              <Icon name="MessageSquare" size={18} />
+              Комментарии
+            </span>
+          </CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-4 pb-20">
+          <div className="space-y-2">
+            <Textarea
+              placeholder="Добавить комментарий..."
+              value={newComment}
+              onChange={(e) => setNewComment(e.target.value)}
+              rows={3}
+            />
+            <Button onClick={handleAddComment} size="sm" className="h-11 touch-manipulation">
+              <Icon name="Plus" size={16} className="mr-2" />
+              Добавить комментарий
+            </Button>
+          </div>
+
+          {comments.length === 0 ? (
+            <p className="text-center text-muted-foreground py-4">
+              Комментариев пока нет
+            </p>
+          ) : (
+            <div className="space-y-3 max-h-64 overflow-y-auto">
+              {comments.slice().reverse().map((comment) => (
+                <div key={comment.id} className="border rounded-lg p-3 bg-muted/30">
+                  <div className="flex items-start justify-between">
+                    <div className="flex-1">
+                      <div className="flex items-center gap-2 mb-1">
+                        <span className="font-medium text-sm">{comment.author}</span>
+                        <span className="text-xs text-muted-foreground">
+                          {formatDateTime(comment.date)}
+                        </span>
+                      </div>
+                      <p className="text-sm text-foreground">{comment.text}</p>
+                    </div>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      onClick={() => handleDeleteComment(comment.id)}
+                    >
+                      <Icon name="Trash2" size={14} />
+                    </Button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </CardContent>
+      </Card>
+    </>
+  );
+};
+
+export default ClientDetailOverview;

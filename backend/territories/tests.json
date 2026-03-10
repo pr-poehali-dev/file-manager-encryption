@@ -1,0 +1,12 @@
+{
+  "tests": [
+    {
+      "name": "GET territories list",
+      "method": "GET",
+      "path": "/",
+      "expectedStatus": 200,
+      "expectedBody": {"territories": []},
+      "bodyMatcher": "partial"
+    }
+  ]
+}

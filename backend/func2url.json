@@ -1,4 +1,7 @@
 {
+  "territories": "https://functions.poehali.dev/8d2c1129-ba2a-42c6-ba25-5b73640423cb",
+  "orders": "https://functions.poehali.dev/59634aae-316f-4b23-ac7b-20d5b698fdb6",
+  "records": "https://functions.poehali.dev/e1958fc3-1b43-4e30-ab4e-e22a3f35e115",
   "documents": "https://functions.poehali.dev/69fbae1c-db1f-49dc-a39c-63ccc8caba63",
   "riddles": "https://functions.poehali.dev/fb6212ce-7863-4f5a-9bca-f2f628978fd2"
 }
