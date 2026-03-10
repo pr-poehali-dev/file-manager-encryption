@@ -111,6 +111,14 @@ export default function Index() {
   const [imgReveal, setImgReveal] = useState(0); // 0..100 percent revealed
   const decryptAnimRef = useRef<number | null>(null);
 
+  // Fake image open animation (glitch)
+  const [fakeImgKey, setFakeImgKey] = useState(0);
+
+  // Encrypt-back animation (red scan line, fake appears from top)
+  const [encryptingFile, setEncryptingFile] = useState(false);
+  const [encryptScan, setEncryptScan] = useState(0); // 0..100 scan progress
+  const encryptAnimRef = useRef<number | null>(null);
+
   // Admin state
   const [adminTab, setAdminTab] = useState<"riddles" | "docs">("riddles");
   const [newQuestion, setNewQuestion] = useState("");
@@ -278,6 +286,23 @@ export default function Index() {
     }
   };
 
+  const startEncryptAnimation = (onDone: () => void) => {
+    if (encryptAnimRef.current) clearInterval(encryptAnimRef.current);
+    setEncryptingFile(true);
+    setEncryptScan(0);
+    let pct = 0;
+    encryptAnimRef.current = window.setInterval(() => {
+      pct += 2;
+      setEncryptScan(pct);
+      if (pct >= 100) {
+        clearInterval(encryptAnimRef.current!);
+        setEncryptingFile(false);
+        setEncryptScan(0);
+        onDone();
+      }
+    }, 25);
+  };
+
   const handleRiddleSubmit = () => {
     const ans = riddleAnswer.trim().toLowerCase();
     const correct = currentRiddle.answer.toLowerCase();
@@ -360,9 +385,15 @@ export default function Index() {
     setSelectedFile(fileId);
     setFileDecrypted(false);
     setDecryptingFile(false);
+    setEncryptingFile(false);
     setVisibleLines(0);
     setImgReveal(0);
+    setEncryptScan(0);
     if (decryptAnimRef.current) clearInterval(decryptAnimRef.current);
+    if (encryptAnimRef.current) clearInterval(encryptAnimRef.current);
+    // Запускаем глитч-анимацию появления фейкового изображения
+    const isImg = file ? ["png", "jpg", "jpeg"].includes(file.type) : false;
+    if (isImg) setFakeImgKey(k => k + 1);
     if (file?.isDb && file.dbId) {
       loadDbFileContent(file.dbId);
     }
@@ -646,18 +677,23 @@ export default function Index() {
                   const imageData = rawContent ? (() => { try { const p = JSON.parse(rawContent); return p._image ? p : null; } catch { return null; } })() : null;
 
                   if (!fileDecrypted) {
-                    // Зашифрованный вид: показываем .jpg (фейк)
+                    // Зашифрованный вид: показываем .jpg (фейк) с глитч-анимацией
                     if (isImage) {
                       const fakeUrl = imageData?.fake_cdn_url ?? (selectedFileData as { fakeCdnUrl?: string | null }).fakeCdnUrl ?? null;
                       if (fakeUrl) {
                         return (
                           <div className="flex flex-col items-center gap-2">
-                            <div className="border-2 border-dashed border-[#800000] p-1">
+                            <div className="border-2 border-dashed border-[#800000] p-1 relative overflow-hidden bg-black">
                               <img
+                                key={fakeImgKey}
                                 src={fakeUrl}
                                 alt="encrypted"
                                 className="max-w-full max-h-[60vh] object-contain"
+                                style={{ animation: "glitchAppear 0.7s ease-out both" }}
                               />
+                            </div>
+                            <div className="text-[9px] text-[#800000] font-bold tracking-widest">
+                              [ЗАШИФРОВАНО]
                             </div>
                           </div>
                         );
@@ -678,7 +714,7 @@ export default function Index() {
                       return (
                         <div className="flex flex-col items-center gap-2">
                           <div className="border-2 border-[#808080] p-1 bg-[#f0f0f0] relative overflow-hidden">
-                            {/* Фейк .jpg — основа */}
+                            {/* Фейк .jpg — основа (показывается при обратной зашифровке) */}
                             {fakeUrl && (
                               <img
                                 src={fakeUrl}
@@ -686,7 +722,7 @@ export default function Index() {
                                 className="max-w-full max-h-[65vh] object-contain block"
                               />
                             )}
-                            {/* Оригинал .png — проявляется сверху вниз через clip-path */}
+                            {/* Оригинал .png — проявляется сверху вниз через clip-path; при зашифровке скрывается */}
                             <img
                               src={realUrl}
                               alt={selectedFileData.name}
@@ -694,11 +730,12 @@ export default function Index() {
                               style={{
                                 position: fakeUrl ? "absolute" : "relative",
                                 top: 0, left: 0, width: "100%", height: "100%",
-                                clipPath: `inset(0 0 ${100 - imgReveal}% 0)`,
-                                transition: decryptingFile ? "none" : "none",
+                                clipPath: encryptingFile
+                                  ? `inset(${encryptScan}% 0 0 0)`
+                                  : `inset(0 0 ${100 - imgReveal}% 0)`,
                               }}
                             />
-                            {/* Сканирующая полоса */}
+                            {/* Зелёная сканирующая полоса (расшифровка) */}
                             {decryptingFile && imgReveal < 100 && (
                               <div
                                 className="absolute left-0 right-0 pointer-events-none"
@@ -710,10 +747,24 @@ export default function Index() {
                                 }}
                               />
                             )}
+                            {/* Красная сканирующая полоса (зашифровка) */}
+                            {encryptingFile && encryptScan < 100 && (
+                              <div
+                                className="absolute left-0 right-0 pointer-events-none"
+                                style={{
+                                  top: `${encryptScan}%`,
+                                  height: "3px",
+                                  background: "linear-gradient(90deg, transparent, #ff2200, #ff4400, transparent)",
+                                  animation: "encryptScanPulse 0.3s ease-in-out infinite",
+                                }}
+                              />
+                            )}
                           </div>
                           <div className="text-[10px] text-[#808080] flex items-center gap-2">
                             {decryptingFile
                               ? <span className="text-[#00aa00] font-bold">▶ РАСШИФРОВКА... {imgReveal}%</span>
+                              : encryptingFile
+                              ? <span className="text-red-700 font-bold">▶ ЗАШИФРОВКА... {encryptScan}%</span>
                               : selectedFileData.name}
                           </div>
                         </div>
@@ -746,7 +797,23 @@ export default function Index() {
               <div className="bg-[#c0c0c0] border-t-2 border-t-white p-2 flex items-center gap-2">
                 {selectedFileData && (
                   fileDecrypted ? (
-                    <button className={btn()} onClick={() => { setFileDecrypted(false); addHistory(currentUser, "action", `Документ зашифрован: ${selectedFileData.name}`); }}>
+                    <button
+                      className={btn(encryptingFile ? "opacity-60 pointer-events-none" : "")}
+                      onClick={() => {
+                        const isImg = ["png", "jpg", "jpeg"].includes(selectedFileData.type);
+                        if (isImg) {
+                          startEncryptAnimation(() => {
+                            setFileDecrypted(false);
+                            setImgReveal(0);
+                            setFakeImgKey(k => k + 1);
+                            addHistory(currentUser, "action", `Документ зашифрован: ${selectedFileData.name}`);
+                          });
+                        } else {
+                          setFileDecrypted(false);
+                          addHistory(currentUser, "action", `Документ зашифрован: ${selectedFileData.name}`);
+                        }
+                      }}
+                    >
                       🔒 Зашифровать
                     </button>
                   ) : (
