@@ -63,6 +63,12 @@ export default function Index() {
   const [dbDocuments, setDbDocuments] = useState<DbDocument[]>([]);
   const [fileContents, setFileContents] = useState<Record<string, string>>({});
 
+  // Decrypt animation
+  const [decryptingFile, setDecryptingFile] = useState(false);
+  const [visibleLines, setVisibleLines] = useState(0);
+  const [imgReveal, setImgReveal] = useState(0); // 0..100 percent revealed
+  const decryptAnimRef = useRef<number | null>(null);
+
   // Admin state
   const [adminTab, setAdminTab] = useState<"riddles" | "docs">("riddles");
   const [newQuestion, setNewQuestion] = useState("");
@@ -164,6 +170,35 @@ export default function Index() {
     addHistory(currentUser, "action", `Запрос расшифровки: ${context === "files" ? "список файлов" : "документ"}`);
   };
 
+  const startDecryptAnimation = (type: "txt" | "image", totalLines: number) => {
+    if (decryptAnimRef.current) clearInterval(decryptAnimRef.current);
+    setDecryptingFile(true);
+    if (type === "txt") {
+      setVisibleLines(0);
+      let line = 0;
+      decryptAnimRef.current = window.setInterval(() => {
+        line += 1;
+        setVisibleLines(line);
+        if (line >= totalLines) {
+          clearInterval(decryptAnimRef.current!);
+          setDecryptingFile(false);
+        }
+      }, 60);
+    } else {
+      setImgReveal(0);
+      let pct = 0;
+      decryptAnimRef.current = window.setInterval(() => {
+        pct += 2;
+        setImgReveal(pct);
+        if (pct >= 100) {
+          clearInterval(decryptAnimRef.current!);
+          setDecryptingFile(false);
+          setImgReveal(100);
+        }
+      }, 30);
+    }
+  };
+
   const handleRiddleSubmit = () => {
     const ans = riddleAnswer.trim().toLowerCase();
     const correct = currentRiddle.answer.toLowerCase();
@@ -172,6 +207,16 @@ export default function Index() {
         setDecrypted(true);
         addHistory(currentUser, "decrypt_ok", "Список файлов расшифрован — верный ответ");
       } else {
+        // Запускаем анимацию перед показом содержимого
+        const file = allFiles.find(f => f.id === selectedFile);
+        const isImg = file ? ["png", "jpg", "jpeg"].includes(file.type) : false;
+        if (isImg) {
+          startDecryptAnimation("image", 0);
+        } else {
+          const raw = fileContents[selectedFile ?? ""] ?? "";
+          const lines = raw.split("\n").length || 20;
+          startDecryptAnimation("txt", lines);
+        }
         setFileDecrypted(true);
         addHistory(currentUser, "decrypt_ok", "Документ расшифрован — верный ответ");
       }
@@ -242,6 +287,10 @@ export default function Index() {
     const file = allFiles.find(f => f.id === fileId);
     setSelectedFile(fileId);
     setFileDecrypted(false);
+    setDecryptingFile(false);
+    setVisibleLines(0);
+    setImgReveal(0);
+    if (decryptAnimRef.current) clearInterval(decryptAnimRef.current);
     if (file?.isDb && file.dbId) {
       loadDbFileContent(file.dbId);
     }
@@ -552,26 +601,72 @@ export default function Index() {
                   // Расшифрованный вид: показываем .png (оригинал)
                   if (isImage) {
                     const realUrl = imageData?.cdn_url ?? (selectedFileData as { cdnUrl?: string | null }).cdnUrl ?? null;
+                    const fakeUrl = imageData?.fake_cdn_url ?? (selectedFileData as { fakeCdnUrl?: string | null }).fakeCdnUrl ?? null;
                     if (realUrl) {
                       return (
                         <div className="flex flex-col items-center gap-2">
-                          <div className="border-2 border-[#808080] p-1 bg-[#f0f0f0]">
+                          <div className="border-2 border-[#808080] p-1 bg-[#f0f0f0] relative overflow-hidden">
+                            {/* Фейк .jpg — основа */}
+                            {fakeUrl && (
+                              <img
+                                src={fakeUrl}
+                                alt="base"
+                                className="max-w-full max-h-[65vh] object-contain block"
+                              />
+                            )}
+                            {/* Оригинал .png — проявляется сверху вниз через clip-path */}
                             <img
                               src={realUrl}
                               alt={selectedFileData.name}
-                              className="max-w-full max-h-[65vh] object-contain"
+                              className="max-w-full max-h-[65vh] object-contain block"
+                              style={{
+                                position: fakeUrl ? "absolute" : "relative",
+                                top: 0, left: 0, width: "100%", height: "100%",
+                                clipPath: `inset(0 0 ${100 - imgReveal}% 0)`,
+                                transition: decryptingFile ? "none" : "none",
+                              }}
                             />
+                            {/* Сканирующая полоса */}
+                            {decryptingFile && imgReveal < 100 && (
+                              <div
+                                className="absolute left-0 right-0 pointer-events-none"
+                                style={{
+                                  top: `${imgReveal}%`,
+                                  height: "3px",
+                                  background: "linear-gradient(90deg, transparent, #00ff00, #00ff00, transparent)",
+                                  boxShadow: "0 0 8px #00ff00, 0 0 16px #00ff00",
+                                }}
+                              />
+                            )}
                           </div>
-                          <div className="text-[10px] text-[#808080]">{selectedFileData.name}</div>
+                          <div className="text-[10px] text-[#808080] flex items-center gap-2">
+                            {decryptingFile
+                              ? <span className="text-[#00aa00] font-bold">▶ РАСШИФРОВКА... {imgReveal}%</span>
+                              : selectedFileData.name}
+                          </div>
                         </div>
                       );
                     }
                     return <div className="text-[#808080] text-xs p-4">Изображение недоступно</div>;
                   }
 
+                  // Расшифрованный вид txt — построчно
+                  const lines = (rawContent ?? "Загрузка...").split("\n");
+                  const shownLines = decryptingFile ? lines.slice(0, visibleLines) : lines;
                   return (
                     <pre className="text-xs leading-5 whitespace-pre-wrap text-black font-mono">
-                      {rawContent ?? "Загрузка..."}
+                      {shownLines.map((line, i) => (
+                        <span
+                          key={i}
+                          className="block"
+                          style={{ animation: `fadeInLine 0.15s ease-out both`, animationDelay: `${i * 0.01}s` }}
+                        >
+                          {line || "\u00a0"}
+                        </span>
+                      ))}
+                      {decryptingFile && (
+                        <span className="inline-block w-2 h-4 bg-[#00aa00] ml-0.5" style={{ animation: "blink 0.5s step-end infinite" }} />
+                      )}
                     </pre>
                   );
                 })()}
