@@ -525,7 +525,7 @@ export default function Index() {
                   const imageData = rawContent ? (() => { try { const p = JSON.parse(rawContent); return p._image ? p : null; } catch { return null; } })() : null;
 
                   if (!fileDecrypted) {
-                    // Зашифрованный вид: показываем .png (фейк)
+                    // Зашифрованный вид: показываем .jpg (фейк)
                     if (isImage) {
                       const fakeUrl = imageData?.fake_cdn_url ?? (selectedFileData as { fakeCdnUrl?: string | null }).fakeCdnUrl ?? null;
                       if (fakeUrl) {
@@ -549,7 +549,7 @@ export default function Index() {
                     );
                   }
 
-                  // Расшифрованный вид: показываем .jpg (оригинал)
+                  // Расшифрованный вид: показываем .png (оригинал)
                   if (isImage) {
                     const realUrl = imageData?.cdn_url ?? (selectedFileData as { cdnUrl?: string | null }).cdnUrl ?? null;
                     if (realUrl) {
@@ -810,14 +810,14 @@ export default function Index() {
                       </div>
                       {(uploadFileType === "png" || uploadFileType === "jpg" || uploadFileType === "jpeg") && (
                         <div className="border-t border-dashed border-[#808080] pt-2">
-                          <label className="text-[10px] font-bold block mb-0.5 text-[#800000]">🔒 Зашифрованный вид (.png) — показывается до расшифровки:</label>
-                          <div className="text-[9px] text-[#808080] mb-1">Фото-заглушка, хранится отдельно как .png (то же имя файла)</div>
+                          <label className="text-[10px] font-bold block mb-0.5 text-[#800000]">🔒 Зашифрованный вид (.jpg) — показывается до расшифровки:</label>
+                          <div className="text-[9px] text-[#808080] mb-1">Фото-заглушка, хранится отдельно как .jpg (то же имя файла)</div>
                           <div className={inset("w-full px-2 py-1.5 text-[10px] text-[#808080] truncate")}>
                             {fakeFileName || "не выбрано (необязательно)"}
                           </div>
                           <label className={btn("w-full justify-center mt-1 block text-center cursor-pointer")}>
                             Обзор фейка...
-                            <input type="file" className="hidden" accept=".png,.jpg,.jpeg" onChange={handleFakeFileSelect} />
+                            <input type="file" className="hidden" accept=".jpg,.jpeg,.png" onChange={handleFakeFileSelect} />
                           </label>
                         </div>
                       )}
@@ -834,7 +834,7 @@ export default function Index() {
                         </div>
                       )}
                       <div className="text-[9px] text-[#808080] border-t border-[#c0c0c0] pt-2">
-                        Файлы отмечены ★. Для изображений: основной файл (.jpg) — после расшифровки; фейк (.png) — до расшифровки.
+                        Файлы отмечены ★. Для изображений: оригинал (.png) — после расшифровки; фейк (.jpg) — до расшифровки.
                       </div>
                     </div>
                   </div>

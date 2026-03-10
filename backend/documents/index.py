@@ -122,15 +122,15 @@ def handler(event: dict, context) -> dict:
             s3.put_object(Bucket="files", Key=s3_key, Body=file_bytes, ContentType=content_type)
             real_cdn = make_cdn_url(s3_key)
 
-            # Upload fake image (shown when encrypted) — same name but .png
-            # Real image (shown after decryption) should be .jpg
+            # Upload fake image (shown when encrypted) — same name but .jpg
+            # Real image (shown after decryption) is .png
             fake_s3_key = None
             fake_cdn = None
             if is_image and fake_data_b64:
                 base_name = name.rsplit(".", 1)[0]
-                fake_s3_key = f"documents/{folder_id}/{base_name}.png"
+                fake_s3_key = f"documents/{folder_id}/{base_name}.jpg"
                 fake_bytes = base64.b64decode(fake_data_b64)
-                s3.put_object(Bucket="files", Key=fake_s3_key, Body=fake_bytes, ContentType="image/png")
+                s3.put_object(Bucket="files", Key=fake_s3_key, Body=fake_bytes, ContentType="image/jpeg")
                 fake_cdn = make_cdn_url(fake_s3_key)
 
             encrypted_name = encrypt_name(name)
