@@ -9,24 +9,12 @@ const RIDDLES_URL = "https://functions.poehali.dev/fb6212ce-7863-4f5a-9bca-f2f62
 const DOCUMENTS_URL = "https://functions.poehali.dev/69fbae1c-db1f-49dc-a39c-63ccc8caba63";
 
 const FOLDERS = [
-  { id: "f1", name: "Телефоны", encrypted: "Т%#@фΩн∆" },
-  { id: "f2", name: "Фотороботы", encrypted: "Ф∅т◊р◉б∇т∑" },
-  { id: "f3", name: "Личные дела", encrypted: "Л!чн∑е ∂€ла" },
-  { id: "f4", name: "Открытые заказы", encrypted: "Ωтк∇∑т∑е ƶ@каз∑" },
-  { id: "f5", name: "Архив заказов", encrypted: "Арх!∞ ƶ@каз∑" },
-  { id: "f6", name: "Архив документов", encrypted: "Арх!∞ д∅к∑м€нт∑" },
-];
-
-const STATIC_FILES = [
-  { id: "doc1", folderId: "f1", name: "контакты_список.txt", encrypted: "к∅нт∂кт∑_с∑@с∅к.тхт", type: "txt", content: "СПИСОК КОНТАКТОВ\n================\nАгент 001: +7 (495) 123-45-67\nАгент 002: +7 (812) 987-65-43\nАгент 003: +7 (343) 555-12-34\nКуратор: +7 (495) 000-00-01\n\nВСЕ ДАННЫЕ СТРОГО КОНФИДЕНЦИАЛЬНЫ" },
-  { id: "doc2", folderId: "f1", name: "экстренная_связь.txt", encrypted: "€кст∑€нн∂я_с∞яƶь.тхт", type: "txt", content: "ЭКСТРЕННАЯ СВЯЗЬ\n================\nКодовое слово: ОРИОН\nЧастота: 156.800 МГц\nВремя выхода: 03:00 / 15:00\n\nПри компрометации — немедленное молчание" },
-  { id: "doc3", folderId: "f2", name: "фоторобот_001.png", encrypted: "ф∅т∅р∅б∅т_∅∅1.пнг", type: "png", content: "[ИЗОБРАЖЕНИЕ: Мужчина, ~40 лет, рост 180 см, тёмные волосы, шрам над левой бровью. Особые приметы: татуировка на запястье в виде якоря]" },
-  { id: "doc4", folderId: "f2", name: "фоторобот_002.png", encrypted: "ф∅т∅р∅б∅т_∅∅2.пнг", type: "png", content: "[ИЗОБРАЖЕНИЕ: Женщина, ~35 лет, рост 165 см, рыжие волосы. Особые приметы: родинка под правым глазом, носит очки с синей оправой]" },
-  { id: "doc5", folderId: "f3", name: "личное_дело_А-117.txt", encrypted: "л!чн∅е_∂€л∅_А-117.тхт", type: "txt", content: "ЛИЧНОЕ ДЕЛО № А-117\n===================\nКодовое имя: СЕРЫЙ\nНастоящее имя: [ЗАСЕКРЕЧЕНО]\nДата рождения: [ЗАСЕКРЕЧЕНО]\nСпециализация: Наружное наблюдение\nСтатус: АКТИВЕН\nУровень допуска: 3" },
-  { id: "doc6", folderId: "f3", name: "личное_дело_Б-223.txt", encrypted: "л!чн∅е_∂€л∅_Б-223.тхт", type: "txt", content: "ЛИЧНОЕ ДЕЛО № Б-223\n===================\nКодовое имя: ТЕНЬ\nНастоящее имя: [ЗАСЕКРЕЧЕНО]\nДата рождения: [ЗАСЕКРЕЧЕНО]\nСпециализация: Технические операции\nСтатус: В РЕЗЕРВЕ\nУровень допуска: 4" },
-  { id: "doc7", folderId: "f4", name: "заказ_ОП-441.txt", encrypted: "ƶ@к∂ƶ_∅П-441.тхт", type: "txt", content: "ОТКРЫТЫЙ ЗАКАЗ № ОП-441\n=======================\nЗаказчик: [ЗАШИФРОВАНО]\nОбъект: Физическое лицо, муж., 52 года\nЗадача: Документирование контактов\nСрок: 30 суток\nСтатус: В РАБОТЕ\nПриоритет: ВЫСОКИЙ" },
-  { id: "doc8", folderId: "f5", name: "архив_2019_ОП-112.txt", encrypted: "∂рх!∞_2019_∅П-112.тхт", type: "txt", content: "АРХИВНЫЙ ЗАКАЗ № ОП-112 (2019)\n==============================\nСтатус: ЗАВЕРШЁН\nРезультат: ВЫПОЛНЕН\nДата закрытия: [ЗАСЕКРЕЧЕНО]\nМатериалы: 47 страниц, 12 фотографий\nМесто хранения: СЕЙФ-7" },
-  { id: "doc9", folderId: "f6", name: "инструкция_безопасности.txt", encrypted: "!нстр∑кц!∞_б€ƶ∅п∂сн∅ст!.тхт", type: "txt", content: "ИНСТРУКЦИЯ ПО БЕЗОПАСНОСТИ\n==========================\n1. Никогда не разглашать кодовые слова\n2. Сеансы связи — только в назначенное время\n3. Документы не покидают защищённый контур\n4. При угрозе — протокол МОЛЧАНИЕ\n5. Проверка на слежку обязательна" },
+  { id: "f1", name: "Телефоны", encrypted: "7Ξq∄#∅⊗nΨ2" },
+  { id: "f2", name: "Фотороботы", encrypted: "∀β9⊕Δ∇⌀Ωr∑" },
+  { id: "f3", name: "Личные дела", encrypted: "ℵ∐Λ4⊘∬Π⌂∯z" },
+  { id: "f4", name: "Открытые заказы", encrypted: "Ξ∮⊞8ℜ∱⌁∰Φ∄k" },
+  { id: "f5", name: "Архив заказов", encrypted: "⊗∂ℑΘ∇∁6⊛Γ⌀" },
+  { id: "f6", name: "Архив документов", encrypted: "∯∬Σ⊕ℵΛ∮⊘∄Ξ" },
 ];
 
 type HistoryEvent = {
@@ -205,7 +193,6 @@ export default function Index() {
   };
 
   const allFiles = [
-    ...STATIC_FILES.map(f => ({ ...f, isDb: false, dbId: undefined as number | undefined })),
     ...dbDocuments.map(d => ({
       id: `db_${d.id}`,
       folderId: d.folder_id,
@@ -534,12 +521,12 @@ export default function Index() {
                   </div>
                 ) : (() => {
                   const isImage = ["png", "jpg", "jpeg"].includes(selectedFileData.type);
-                  const rawContent = selectedFileData.isDb ? fileContents[selectedFileData.id] : null;
+                  const rawContent = fileContents[selectedFileData.id] ?? null;
                   const imageData = rawContent ? (() => { try { const p = JSON.parse(rawContent); return p._image ? p : null; } catch { return null; } })() : null;
 
                   if (!fileDecrypted) {
                     // Encrypted view: for images — show fake jpg if available, else encrypted garble
-                    if (isImage && selectedFileData.isDb) {
+                    if (isImage) {
                       const fakeUrl = (selectedFileData as { fakeCdnUrl?: string | null }).fakeCdnUrl
                         || (imageData?.fake_cdn_url ?? null);
                       if (fakeUrl) {
@@ -551,7 +538,6 @@ export default function Index() {
                                 src={fakeUrl}
                                 alt="encrypted"
                                 className="max-w-full max-h-[60vh] object-contain"
-                                style={{ filter: "grayscale(60%) contrast(0.8) brightness(0.7) blur(2px)" }}
                               />
                             </div>
                             <div className="text-[9px] text-[#808080]">Изображение искажено — расшифруйте для просмотра оригинала</div>
@@ -568,13 +554,11 @@ export default function Index() {
 
                   // Decrypted view
                   if (isImage) {
-                    const realUrl = selectedFileData.isDb
-                      ? ((selectedFileData as { cdnUrl?: string | null }).cdnUrl || imageData?.cdn_url)
-                      : null;
+                    const realUrl = (selectedFileData as { cdnUrl?: string | null }).cdnUrl || imageData?.cdn_url;
                     if (realUrl) {
                       return (
                         <div className="flex flex-col items-center gap-2">
-                          <div className={`border-2 border-[#808080] p-1 bg-[#f0f0f0]`}>
+                          <div className="border-2 border-[#808080] p-1 bg-[#f0f0f0]">
                             <img
                               src={realUrl}
                               alt={selectedFileData.name}
@@ -585,19 +569,12 @@ export default function Index() {
                         </div>
                       );
                     }
-                    // static png placeholder
-                    return (
-                      <div className="border-2 border-dashed border-[#808080] p-4 text-center">
-                        <div className="text-6xl mb-2">🖼</div>
-                        <div className="text-[#808080] text-[10px] mb-2">[ ИЗОБРАЖЕНИЕ ]</div>
-                        <div className="text-left text-xs">{selectedFileData.content}</div>
-                      </div>
-                    );
+                    return <div className="text-[#808080] text-xs p-4">Изображение недоступно</div>;
                   }
 
                   return (
                     <pre className="text-xs leading-5 whitespace-pre-wrap text-black font-mono">
-                      {selectedFileData.isDb ? (rawContent ?? "Загрузка...") : selectedFileData.content}
+                      {rawContent ?? "Загрузка..."}
                     </pre>
                   );
                 })()}
