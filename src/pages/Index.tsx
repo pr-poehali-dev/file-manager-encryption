@@ -2,8 +2,38 @@ import { useState, useEffect, useCallback, useRef } from "react";
 
 const VALID_LOGINS = ["admin", "argentarius", "actuari", "edilus", "cpd", "mortum"];
 const ADMIN_LOGIN = "admin";
-const SESSION_DURATION = 60 * 60 * 1000;
-const PENALTY = 15 * 60 * 1000;
+const SESSION_DURATION = 30 * 60 * 1000;      // 30 минут
+const PENALTY = 10 * 60 * 1000;               // 10 минут штраф
+const LOCKOUT_DURATION = 180 * 60 * 1000;     // 180 минут блокировки
+const WARN_THRESHOLD = 5 * 60 * 1000;         // предупреждение за 5 минут
+
+const LS_PREFIX = "securefs_";
+const lsKey = (login: string, key: string) => `${LS_PREFIX}${login}_${key}`;
+
+// Сохранить оставшееся время сессии
+function saveSession(login: string, expiry: number) {
+  localStorage.setItem(lsKey(login, "expiry"), String(expiry));
+}
+// Загрузить оставшееся время сессии
+function loadSessionExpiry(login: string): number | null {
+  const v = localStorage.getItem(lsKey(login, "expiry"));
+  return v ? Number(v) : null;
+}
+// Заблокировать логин на 180 минут
+function lockout(login: string) {
+  localStorage.setItem(lsKey(login, "lockout"), String(Date.now() + LOCKOUT_DURATION));
+  localStorage.removeItem(lsKey(login, "expiry"));
+}
+// Проверить блокировку — возвращает оставшееся мс или 0
+function getLockoutLeft(login: string): number {
+  const v = localStorage.getItem(lsKey(login, "lockout"));
+  if (!v) return 0;
+  const left = Number(v) - Date.now();
+  return left > 0 ? left : 0;
+}
+function clearSession(login: string) {
+  localStorage.removeItem(lsKey(login, "expiry"));
+}
 
 const RIDDLES_URL = "https://functions.poehali.dev/fb6212ce-7863-4f5a-9bca-f2f628978fd2";
 const DOCUMENTS_URL = "https://functions.poehali.dev/69fbae1c-db1f-49dc-a39c-63ccc8caba63";
@@ -29,6 +59,15 @@ type ActiveTab = "files" | "history" | "help" | "admin";
 
 type Riddle = { id: number; question: string; answer: string; created_at?: string };
 type DbDocument = { id: number; folder_id: string; name: string; encrypted_name: string; file_type: string; created_at?: string; cdn_url?: string; fake_cdn_url?: string };
+
+function formatTimeMs(ms: number): string {
+  if (ms <= 0) return "00:00:00";
+  const s = Math.floor(ms / 1000);
+  const h = Math.floor(s / 3600);
+  const m = Math.floor((s % 3600) / 60);
+  const sec = s % 60;
+  return `${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}:${String(sec).padStart(2, "0")}`;
+}
 
 const btn = (extra = "") =>
   `border-2 border-t-white border-l-white border-b-[#808080] border-r-[#808080] bg-[#c0c0c0] text-black px-3 py-1 text-xs font-mono cursor-pointer active:border-t-[#808080] active:border-l-[#808080] active:border-b-white active:border-r-white select-none hover:bg-[#d4d0c8] ${extra}`;
@@ -56,6 +95,9 @@ export default function Index() {
   const [riddleAnswer, setRiddleAnswer] = useState("");
   const [riddleError, setRiddleError] = useState("");
   const [showExpiredDialog, setShowExpiredDialog] = useState(false);
+  const [showWarnDialog, setShowWarnDialog] = useState(false);
+  const [warnShown, setWarnShown] = useState(false);
+  const [lockoutLeft, setLockoutLeft] = useState(0);
   const timerRef = useRef<number | null>(null);
 
   // DB riddles & documents
@@ -119,13 +161,20 @@ export default function Index() {
         setTimeLeft(0);
         setShowExpiredDialog(true);
         addHistory(currentUser, "session_expired", "Сессия истекла автоматически");
+        lockout(currentUser);
         if (timerRef.current) clearInterval(timerRef.current);
       } else {
         setTimeLeft(left);
+        saveSession(currentUser, sessionExpiry);
+        // Предупреждение за 5 минут
+        if (left <= WARN_THRESHOLD && !warnShown) {
+          setWarnShown(true);
+          setShowWarnDialog(true);
+        }
       }
     }, 1000);
     return () => { if (timerRef.current) clearInterval(timerRef.current); };
-  }, [appState, sessionExpiry, currentUser, addHistory]);
+  }, [appState, sessionExpiry, currentUser, addHistory, warnShown]);
 
   const handleLogin = () => {
     const login = loginInput.trim().toLowerCase();
@@ -133,17 +182,45 @@ export default function Index() {
       setLoginError("Неверный логин. Доступ запрещён.");
       return;
     }
-    const expiry = Date.now() + SESSION_DURATION;
+    // Проверяем блокировку
+    const lockLeft = getLockoutLeft(login);
+    if (lockLeft > 0) {
+      setLockoutLeft(lockLeft);
+      setLoginError(`ДОСТУП ЗАБЛОКИРОВАН. Повтор через: ${formatTimeMs(lockLeft)}`);
+      // Обновляем таймер блокировки каждую секунду
+      const iv = window.setInterval(() => {
+        const ll = getLockoutLeft(login);
+        if (ll <= 0) {
+          clearInterval(iv);
+          setLoginError("");
+          setLockoutLeft(0);
+        } else {
+          setLockoutLeft(ll);
+          setLoginError(`ДОСТУП ЗАБЛОКИРОВАН. Повтор через: ${formatTimeMs(ll)}`);
+        }
+      }, 1000);
+      return;
+    }
+    // Восстанавливаем сохранённое время или стартуем новую сессию
+    const savedExpiry = loadSessionExpiry(login);
+    const expiry = (savedExpiry && savedExpiry > Date.now()) ? savedExpiry : Date.now() + SESSION_DURATION;
+    const left = expiry - Date.now();
     setCurrentUser(login);
     setSessionExpiry(expiry);
-    setTimeLeft(SESSION_DURATION);
+    setTimeLeft(left);
+    setWarnShown(left <= WARN_THRESHOLD);
     setAppState("main");
     setLoginError("");
-    addHistory(login, "login", "Вход в систему выполнен");
+    const restored = savedExpiry && savedExpiry > Date.now();
+    addHistory(login, "login", restored ? `Вход выполнен, сессия восстановлена (осталось ${formatTimeMs(left)})` : "Вход в систему выполнен");
   };
 
-  const handleLogout = () => {
-    addHistory(currentUser, "logout", "Выход из системы");
+  const handleLogout = (expired = false) => {
+    if (!expired) {
+      // Сохраняем оставшееся время при добровольном выходе
+      saveSession(currentUser, sessionExpiry);
+      addHistory(currentUser, "logout", `Выход из системы (осталось ${formatTimeMs(sessionExpiry - Date.now())})`);
+    }
     if (timerRef.current) clearInterval(timerRef.current);
     setAppState("login");
     setCurrentUser("");
@@ -153,6 +230,8 @@ export default function Index() {
     setSelectedFolder(null);
     setLoginInput("");
     setShowExpiredDialog(false);
+    setShowWarnDialog(false);
+    setWarnShown(false);
     setDbRiddles([]);
     setDbDocuments([]);
   };
@@ -223,19 +302,12 @@ export default function Index() {
       setShowRiddleDialog(false);
     } else {
       setSessionExpiry(prev => prev - PENALTY);
-      setRiddleError("Неверно! Снято 15 минут сессии.");
-      addHistory(currentUser, "decrypt_fail", "Неверный ответ на загадку — штраф 15 минут");
+      setRiddleError("Неверно! Снято 10 минут сессии.");
+      addHistory(currentUser, "decrypt_fail", "Неверный ответ на загадку — штраф 10 минут");
     }
   };
 
-  const formatTime = (ms: number) => {
-    if (ms <= 0) return "00:00:00";
-    const s = Math.floor(ms / 1000);
-    const h = Math.floor(s / 3600);
-    const m = Math.floor((s % 3600) / 60);
-    const sec = s % 60;
-    return `${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}:${String(sec).padStart(2, "0")}`;
-  };
+  const formatTime = formatTimeMs;
 
   const allFiles = [
     ...dbDocuments.map(d => ({
@@ -470,7 +542,7 @@ export default function Index() {
           </span>
         </div>
         <div className="flex items-center gap-2">
-          <div className={`text-[10px] px-2 py-0.5 font-bold border ${timeLeft < 10 * 60 * 1000 ? "bg-red-800 text-white border-red-600 animate-pulse" : "bg-[#000060] text-[#00ff00] border-[#0000a0]"}`}>
+          <div className={`text-[10px] px-2 py-0.5 font-bold border ${timeLeft < WARN_THRESHOLD ? "bg-red-800 text-white border-red-600 animate-pulse" : "bg-[#000060] text-[#00ff00] border-[#0000a0]"}`}>
             ⏱ {formatTime(timeLeft)}
           </div>
           <button className={btn("text-[10px] px-3")} onClick={handleLogout}>Выход</button>
@@ -752,11 +824,12 @@ export default function Index() {
                   <div className="border-b-2 border-b-[#808080] mt-2 mb-3" />
                 </div>
                 {[
-                  { icon: "🔐", title: "Авторизация", text: "Введите ваш логин для входа в систему. Пароль не требуется. После входа начинается защищённая сессия длительностью 60 минут." },
-                  { icon: "⏱", title: "Управление сессией", text: "Таймер сессии отображается в правом верхнем углу. Неверные ответы на загадки снимают 15 минут. По истечении времени система блокируется автоматически." },
+                  { icon: "🔐", title: "Авторизация", text: "Введите ваш логин для входа в систему. Пароль не требуется. При выходе оставшееся время сессии сохраняется — при следующем входе сессия продолжится." },
+                  { icon: "⏱", title: "Управление сессией", text: "Время жизни новой сессии — 30 минут. Таймер отображается в правом верхнем углу. За 5 минут до истечения система выдаст предупреждение. При истечении вход заблокируется на 180 минут — обратный отсчёт отображается на экране авторизации." },
+                  { icon: "🔒", title: "Блокировка при истечении", text: "Если сессия истекла автоматически (не был выполнен выход), логин блокируется на 180 минут. Время до разблокировки отображается при попытке входа." },
                   { icon: "📁", title: "Файловый менеджер", text: "Левая панель содержит папки и файлы. Нажмите на папку для раскрытия содержимого. Нажмите на файл для просмотра в правой панели." },
-                  { icon: "🔒", title: "Шифрование данных", text: "Все имена файлов и содержимое документов зашифрованы. Для просмотра используйте кнопку «Расшифровать» в нижней части каждой панели." },
-                  { icon: "🧩", title: "Система загадок", text: "При расшифровке система задаёт контрольную загадку. Правильный ответ открывает данные. Неверный ответ — штраф 15 минут от сессии. Ответ вводится строчными буквами." },
+                  { icon: "🔑", title: "Шифрование данных", text: "Все имена файлов и содержимое документов зашифрованы. Для просмотра используйте кнопку «Расшифровать» в нижней части каждой панели." },
+                  { icon: "🧩", title: "Система загадок", text: "При расшифровке система задаёт контрольную загадку. Правильный ответ открывает данные. Неверный ответ — штраф 10 минут от сессии. Ответ вводится строчными буквами." },
                   { icon: "⚙", title: "Администратор", text: "Пользователь admin имеет доступ к панели администратора. Там можно добавлять и удалять загадки, а также загружать документы в папки файлового менеджера." },
                 ].map((item, i) => (
                   <div key={i} className="flex gap-3 border-l-4 border-[#000080] pl-3">
@@ -1030,12 +1103,38 @@ export default function Index() {
                 </div>
               )}
               <div className="text-[9px] text-[#808080] border-t border-[#c0c0c0] pt-2">
-                Внимание: неверный ответ снимает 15 минут от времени сессии
+                Внимание: неверный ответ снимает 10 минут от времени сессии
               </div>
               <div className="flex gap-2 justify-center">
                 <button className={btn("px-8")} onClick={handleRiddleSubmit}>Подтвердить</button>
                 <button className={btn("px-4")} onClick={() => setShowRiddleDialog(false)}>Отмена</button>
               </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Warning: 5 minutes left */}
+      {showWarnDialog && (
+        <div className="fixed inset-0 bg-black/20 flex items-center justify-center z-40">
+          <div className="bg-[#c0c0c0] border-2 border-t-white border-l-white border-b-[#808080] border-r-[#808080] w-76 shadow-[6px_6px_12px_rgba(0,0,0,0.6)]">
+            <div className="bg-[#808000] px-2 py-1 flex items-center justify-between select-none">
+              <span className="text-white text-xs font-bold">⚠ Предупреждение системы</span>
+              <button className={btn("text-[10px] px-1.5 py-0 h-4 flex items-center")} onClick={() => setShowWarnDialog(false)}>✕</button>
+            </div>
+            <div className="p-4 space-y-3">
+              <div className={inset("p-3 text-center bg-[#fffff0]")}>
+                <div className="text-3xl mb-1">⏳</div>
+                <div className="text-xs font-bold text-[#808000] tracking-wide">ОСТАЛОСЬ МЕНЕЕ 5 МИНУТ</div>
+                <div className="text-[10px] text-[#404040] mt-1 leading-4">
+                  Сессия истекает. Сохраните работу.<br />
+                  При истечении вход будет заблокирован на 180 минут.
+                </div>
+                <div className="text-lg font-bold text-red-800 mt-2 font-mono">{formatTime(timeLeft)}</div>
+              </div>
+              <button className={btn("w-full text-center justify-center")} onClick={() => setShowWarnDialog(false)}>
+                Понял, продолжить работу
+              </button>
             </div>
           </div>
         </div>
@@ -1050,15 +1149,15 @@ export default function Index() {
             </div>
             <div className="p-5 space-y-3">
               <div className={inset("p-4 text-center")}>
-                <div className="text-5xl mb-2">⏱</div>
+                <div className="text-5xl mb-2">⛔</div>
                 <div className="text-sm font-bold text-red-800 tracking-widest">СЕССИЯ ИСТЕКЛА</div>
                 <div className="text-xs text-[#404040] mt-2 leading-4">
                   Время защищённой сессии исчерпано.<br />
                   Все данные заблокированы.<br />
-                  Для продолжения работы необходим повторный вход.
+                  Повторный вход заблокирован на <b>180 минут</b>.
                 </div>
               </div>
-              <button className={btn("w-full text-center justify-center")} onClick={handleLogout}>
+              <button className={btn("w-full text-center justify-center")} onClick={() => handleLogout(true)}>
                 Вернуться к авторизации
               </button>
             </div>
