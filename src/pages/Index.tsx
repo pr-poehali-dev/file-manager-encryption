@@ -217,8 +217,8 @@ export default function Index() {
       const data = await r.json();
       const parsed = typeof data === "string" ? JSON.parse(data) : data;
       if (parsed.type && parsed.type !== "txt") {
-        // image: store JSON with cdn_url and fake_txt_content
-        setFileContents(prev => ({ ...prev, [key]: JSON.stringify({ _image: true, cdn_url: parsed.cdn_url, fake_txt_content: parsed.fake_txt_content ?? null, type: parsed.type }) }));
+        // image: cdn_url = .jpg (расшифрованный), fake_cdn_url = .png (зашифрованный)
+        setFileContents(prev => ({ ...prev, [key]: JSON.stringify({ _image: true, cdn_url: parsed.cdn_url, fake_cdn_url: parsed.fake_cdn_url ?? null, type: parsed.type }) }));
       } else {
         setFileContents(prev => ({ ...prev, [key]: parsed.content || "[Ошибка загрузки]" }));
       }
@@ -525,15 +525,23 @@ export default function Index() {
                   const imageData = rawContent ? (() => { try { const p = JSON.parse(rawContent); return p._image ? p : null; } catch { return null; } })() : null;
 
                   if (!fileDecrypted) {
-                    // Encrypted view for images: show fake .txt content if available
-                    if (isImage && imageData?.fake_txt_content) {
-                      return (
-                        <pre className="text-xs text-black leading-5 whitespace-pre-wrap font-mono">
-                          {imageData.fake_txt_content}
-                        </pre>
-                      );
+                    // Зашифрованный вид: показываем .png (фейк)
+                    if (isImage) {
+                      const fakeUrl = imageData?.fake_cdn_url ?? (selectedFileData as { fakeCdnUrl?: string | null }).fakeCdnUrl ?? null;
+                      if (fakeUrl) {
+                        return (
+                          <div className="flex flex-col items-center gap-2">
+                            <div className="border-2 border-dashed border-[#800000] p-1">
+                              <img
+                                src={fakeUrl}
+                                alt="encrypted"
+                                className="max-w-full max-h-[60vh] object-contain"
+                              />
+                            </div>
+                          </div>
+                        );
+                      }
                     }
-                    // Default encrypted garble
                     return (
                       <pre className="text-xs text-[#800000] leading-5 whitespace-pre-wrap break-all font-mono">
 {`[ЗАШИФРОВАННЫЙ ДОКУМЕНТ]\n${"─".repeat(34)}\n\n${encryptedContent()}\n\n${"─".repeat(34)}\n[ТРЕБУЕТСЯ РАСШИФРОВКА]`}
@@ -541,9 +549,9 @@ export default function Index() {
                     );
                   }
 
-                  // Decrypted view
+                  // Расшифрованный вид: показываем .jpg (оригинал)
                   if (isImage) {
-                    const realUrl = (selectedFileData as { cdnUrl?: string | null }).cdnUrl || imageData?.cdn_url;
+                    const realUrl = imageData?.cdn_url ?? (selectedFileData as { cdnUrl?: string | null }).cdnUrl ?? null;
                     if (realUrl) {
                       return (
                         <div className="flex flex-col items-center gap-2">
@@ -802,14 +810,14 @@ export default function Index() {
                       </div>
                       {(uploadFileType === "png" || uploadFileType === "jpg" || uploadFileType === "jpeg") && (
                         <div className="border-t border-dashed border-[#808080] pt-2">
-                          <label className="text-[10px] font-bold block mb-0.5 text-[#800000]">🔒 Фейк-документ (.txt) — показывается до расшифровки:</label>
-                          <div className="text-[9px] text-[#808080] mb-1">Текстовый файл с тем же именем, хранится отдельно как .txt</div>
+                          <label className="text-[10px] font-bold block mb-0.5 text-[#800000]">🔒 Зашифрованный вид (.png) — показывается до расшифровки:</label>
+                          <div className="text-[9px] text-[#808080] mb-1">Фото-заглушка, хранится отдельно как .png (то же имя файла)</div>
                           <div className={inset("w-full px-2 py-1.5 text-[10px] text-[#808080] truncate")}>
                             {fakeFileName || "не выбрано (необязательно)"}
                           </div>
                           <label className={btn("w-full justify-center mt-1 block text-center cursor-pointer")}>
                             Обзор фейка...
-                            <input type="file" className="hidden" accept=".txt" onChange={handleFakeFileSelect} />
+                            <input type="file" className="hidden" accept=".png,.jpg,.jpeg" onChange={handleFakeFileSelect} />
                           </label>
                         </div>
                       )}
@@ -826,7 +834,7 @@ export default function Index() {
                         </div>
                       )}
                       <div className="text-[9px] text-[#808080] border-t border-[#c0c0c0] pt-2">
-                        Файлы отмечены ★ в менеджере. PNG/JPG: фейк-документ (.txt) показывается до расшифровки как обычный текст. После расшифровки — оригинальное изображение.
+                        Файлы отмечены ★. Для изображений: основной файл (.jpg) — после расшифровки; фейк (.png) — до расшифровки.
                       </div>
                     </div>
                   </div>
