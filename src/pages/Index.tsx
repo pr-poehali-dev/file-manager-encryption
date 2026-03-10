@@ -40,7 +40,7 @@ type AppState = "login" | "main" | "expired";
 type ActiveTab = "files" | "history" | "help" | "admin";
 
 type Riddle = { id: number; question: string; answer: string; created_at?: string };
-type DbDocument = { id: number; folder_id: string; name: string; encrypted_name: string; file_type: string; created_at?: string };
+type DbDocument = { id: number; folder_id: string; name: string; encrypted_name: string; file_type: string; created_at?: string; cdn_url?: string; fake_cdn_url?: string };
 
 const btn = (extra = "") =>
   `border-2 border-t-white border-l-white border-b-[#808080] border-r-[#808080] bg-[#c0c0c0] text-black px-3 py-1 text-xs font-mono cursor-pointer active:border-t-[#808080] active:border-l-[#808080] active:border-b-white active:border-r-white select-none hover:bg-[#d4d0c8] ${extra}`;
@@ -84,6 +84,8 @@ export default function Index() {
   const [uploadFileName, setUploadFileName] = useState("");
   const [uploadFileData, setUploadFileData] = useState<string | null>(null);
   const [uploadFileType, setUploadFileType] = useState("txt");
+  const [fakeFileName, setFakeFileName] = useState("");
+  const [fakeFileData, setFakeFileData] = useState<string | null>(null);
   const [uploading, setUploading] = useState(false);
 
   const addHistory = useCallback((user: string, type: HistoryEvent["type"], description: string) => {
@@ -213,20 +215,28 @@ export default function Index() {
       content: "",
       isDb: true,
       dbId: d.id,
+      cdnUrl: d.cdn_url || null,
+      fakeCdnUrl: d.fake_cdn_url || null,
     }))
   ];
 
   const selectedFileData = allFiles.find(f => f.id === selectedFile);
 
   const loadDbFileContent = async (dbId: number) => {
-    if (fileContents[`db_${dbId}`] !== undefined) return;
+    const key = `db_${dbId}`;
+    if (fileContents[key] !== undefined) return;
     try {
       const r = await fetch(`${DOCUMENTS_URL}?action=content&id=${dbId}`);
       const data = await r.json();
       const parsed = typeof data === "string" ? JSON.parse(data) : data;
-      setFileContents(prev => ({ ...prev, [`db_${dbId}`]: parsed.content || "[Ошибка загрузки]" }));
+      if (parsed.type && parsed.type !== "txt") {
+        // image: store JSON with cdn_url and fake_cdn_url
+        setFileContents(prev => ({ ...prev, [key]: JSON.stringify({ _image: true, cdn_url: parsed.cdn_url, fake_cdn_url: parsed.fake_cdn_url, type: parsed.type }) }));
+      } else {
+        setFileContents(prev => ({ ...prev, [key]: parsed.content || "[Ошибка загрузки]" }));
+      }
     } catch {
-      setFileContents(prev => ({ ...prev, [`db_${dbId}`]: "[Ошибка загрузки содержимого]" }));
+      setFileContents(prev => ({ ...prev, [key]: "[Ошибка загрузки содержимого]" }));
     }
   };
 
@@ -292,19 +302,30 @@ export default function Index() {
   };
 
   // Admin: upload file
-  const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const readFileAsB64 = (file: File): Promise<string> =>
+    new Promise((resolve) => {
+      const reader = new FileReader();
+      reader.onload = (ev) => resolve(((ev.target?.result as string) || "").split(",")[1]);
+      reader.readAsDataURL(file);
+    });
+
+  const handleFileSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
     const ext = file.name.split(".").pop()?.toLowerCase() || "txt";
-    setUploadFileType(ext === "png" || ext === "jpg" || ext === "jpeg" ? "png" : "txt");
+    const isImg = ext === "png" || ext === "jpg" || ext === "jpeg";
+    setUploadFileType(isImg ? ext : "txt");
     setUploadFileName(file.name);
-    const reader = new FileReader();
-    reader.onload = (ev) => {
-      const result = ev.target?.result as string;
-      const b64 = result.split(",")[1];
-      setUploadFileData(b64);
-    };
-    reader.readAsDataURL(file);
+    const b64 = await readFileAsB64(file);
+    setUploadFileData(b64);
+  };
+
+  const handleFakeFileSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setFakeFileName(file.name);
+    const b64 = await readFileAsB64(file);
+    setFakeFileData(b64);
   };
 
   const handleUpload = async () => {
@@ -320,6 +341,7 @@ export default function Index() {
           name: uploadFileName,
           file_type: uploadFileType,
           file_data: uploadFileData,
+          ...(fakeFileData ? { fake_file_data: fakeFileData } : {}),
         }),
       });
       const data = await r.json();
@@ -328,6 +350,8 @@ export default function Index() {
         setAdminMsg(`Файл "${uploadFileName}" загружен!`);
         setUploadFileName("");
         setUploadFileData(null);
+        setFakeFileName("");
+        setFakeFileData(null);
         loadDocuments();
       } else {
         setAdminMsg("Ошибка: " + (parsed.error || "неизвестно"));
@@ -508,17 +532,75 @@ export default function Index() {
                     <div>Выберите файл в левой панели</div>
                     <div className="text-[10px] mt-1 text-[#a0a0a0]">для просмотра содержимого</div>
                   </div>
-                ) : !fileDecrypted ? (
-                  <pre className="text-xs text-[#800000] leading-5 whitespace-pre-wrap break-all font-mono">
+                ) : (() => {
+                  const isImage = ["png", "jpg", "jpeg"].includes(selectedFileData.type);
+                  const rawContent = selectedFileData.isDb ? fileContents[selectedFileData.id] : null;
+                  const imageData = rawContent ? (() => { try { const p = JSON.parse(rawContent); return p._image ? p : null; } catch { return null; } })() : null;
+
+                  if (!fileDecrypted) {
+                    // Encrypted view: for images — show fake jpg if available, else encrypted garble
+                    if (isImage && selectedFileData.isDb) {
+                      const fakeUrl = (selectedFileData as { fakeCdnUrl?: string | null }).fakeCdnUrl
+                        || (imageData?.fake_cdn_url ?? null);
+                      if (fakeUrl) {
+                        return (
+                          <div className="flex flex-col items-center gap-2">
+                            <div className="text-[10px] text-[#800000] font-bold mb-1">[ЗАШИФРОВАННОЕ ИЗОБРАЖЕНИЕ]</div>
+                            <div className={`border-2 border-dashed border-[#800000] p-1`}>
+                              <img
+                                src={fakeUrl}
+                                alt="encrypted"
+                                className="max-w-full max-h-[60vh] object-contain"
+                                style={{ filter: "grayscale(60%) contrast(0.8) brightness(0.7) blur(2px)" }}
+                              />
+                            </div>
+                            <div className="text-[9px] text-[#808080]">Изображение искажено — расшифруйте для просмотра оригинала</div>
+                          </div>
+                        );
+                      }
+                    }
+                    return (
+                      <pre className="text-xs text-[#800000] leading-5 whitespace-pre-wrap break-all font-mono">
 {`[ЗАШИФРОВАННЫЙ ДОКУМЕНТ]\n${"─".repeat(34)}\n\n${encryptedContent()}\n\n${"─".repeat(34)}\n[ТРЕБУЕТСЯ РАСШИФРОВКА]`}
-                  </pre>
-                ) : (
-                  <pre className="text-xs leading-5 whitespace-pre-wrap text-black font-mono">
-                    {selectedFileData.isDb
-                      ? (fileContents[selectedFileData.id] ?? "Загрузка...")
-                      : selectedFileData.content}
-                  </pre>
-                )}
+                      </pre>
+                    );
+                  }
+
+                  // Decrypted view
+                  if (isImage) {
+                    const realUrl = selectedFileData.isDb
+                      ? ((selectedFileData as { cdnUrl?: string | null }).cdnUrl || imageData?.cdn_url)
+                      : null;
+                    if (realUrl) {
+                      return (
+                        <div className="flex flex-col items-center gap-2">
+                          <div className={`border-2 border-[#808080] p-1 bg-[#f0f0f0]`}>
+                            <img
+                              src={realUrl}
+                              alt={selectedFileData.name}
+                              className="max-w-full max-h-[65vh] object-contain"
+                            />
+                          </div>
+                          <div className="text-[10px] text-[#808080]">{selectedFileData.name}</div>
+                        </div>
+                      );
+                    }
+                    // static png placeholder
+                    return (
+                      <div className="border-2 border-dashed border-[#808080] p-4 text-center">
+                        <div className="text-6xl mb-2">🖼</div>
+                        <div className="text-[#808080] text-[10px] mb-2">[ ИЗОБРАЖЕНИЕ ]</div>
+                        <div className="text-left text-xs">{selectedFileData.content}</div>
+                      </div>
+                    );
+                  }
+
+                  return (
+                    <pre className="text-xs leading-5 whitespace-pre-wrap text-black font-mono">
+                      {selectedFileData.isDb ? (rawContent ?? "Загрузка...") : selectedFileData.content}
+                    </pre>
+                  );
+                })()}
               </div>
               <div className="bg-[#c0c0c0] border-t-2 border-t-white p-2 flex items-center gap-2">
                 {selectedFileData && (
@@ -743,7 +825,7 @@ export default function Index() {
                         </select>
                       </div>
                       <div>
-                        <label className="text-[10px] font-bold block mb-1">Файл (.txt или .png):</label>
+                        <label className="text-[10px] font-bold block mb-1">Файл (.txt, .png, .jpg):</label>
                         <div className={inset("w-full px-2 py-1.5 text-[10px] text-[#808080] truncate")}>
                           {uploadFileName || "файл не выбран"}
                         </div>
@@ -752,6 +834,19 @@ export default function Index() {
                           <input type="file" className="hidden" accept=".txt,.png,.jpg,.jpeg" onChange={handleFileSelect} />
                         </label>
                       </div>
+                      {(uploadFileType === "png" || uploadFileType === "jpg" || uploadFileType === "jpeg") && (
+                        <div className="border-t border-dashed border-[#808080] pt-2">
+                          <label className="text-[10px] font-bold block mb-0.5 text-[#800000]">🔒 Фейк-изображение (.jpg) — показывается зашифрованным:</label>
+                          <div className="text-[9px] text-[#808080] mb-1">Загружается отдельно, то же имя файла но .jpg</div>
+                          <div className={inset("w-full px-2 py-1.5 text-[10px] text-[#808080] truncate")}>
+                            {fakeFileName || "не выбрано (необязательно)"}
+                          </div>
+                          <label className={btn("w-full justify-center mt-1 block text-center cursor-pointer")}>
+                            Обзор фейка...
+                            <input type="file" className="hidden" accept=".jpg,.jpeg,.png" onChange={handleFakeFileSelect} />
+                          </label>
+                        </div>
+                      )}
                       <button
                         className={btn(`w-full justify-center ${uploading ? "opacity-50" : ""}`)}
                         onClick={handleUpload}
@@ -765,7 +860,7 @@ export default function Index() {
                         </div>
                       )}
                       <div className="text-[9px] text-[#808080] border-t border-[#c0c0c0] pt-2">
-                        Загруженные файлы отмечены ★ в файловом менеджере
+                        Файлы отмечены ★ в менеджере. PNG/JPG: фейк-изображение показывается до расшифровки с эффектом искажения.
                       </div>
                     </div>
                   </div>
@@ -780,6 +875,7 @@ export default function Index() {
                             <th className="text-left px-2 py-1 border-b-2 border-b-[#808080] text-[10px]">Имя файла</th>
                             <th className="text-left px-2 py-1 border-b-2 border-b-[#808080] text-[10px] w-28">Папка</th>
                             <th className="text-left px-2 py-1 border-b-2 border-b-[#808080] text-[10px] w-16">Тип</th>
+                            <th className="px-2 py-1 border-b-2 border-b-[#808080] text-[10px] w-12">Фейк</th>
                             <th className="px-2 py-1 border-b-2 border-b-[#808080] text-[10px] w-16">Удалить</th>
                           </tr>
                         </thead>
@@ -790,6 +886,9 @@ export default function Index() {
                               <td className="px-2 py-1 text-[11px]">{d.name}</td>
                               <td className="px-2 py-1 text-[#000080] text-[10px]">{FOLDERS.find(f => f.id === d.folder_id)?.name || d.folder_id}</td>
                               <td className="px-2 py-1 text-[10px] uppercase">.{d.file_type}</td>
+                              <td className="px-2 py-1 text-center text-[10px]">
+                                {d.fake_cdn_url ? <span className="text-green-700 font-bold">✓</span> : <span className="text-[#c0c0c0]">—</span>}
+                              </td>
                               <td className="px-2 py-1 text-center">
                                 <button
                                   className={btn("text-[10px] px-2 py-0.5 text-red-800 hover:bg-red-100")}
@@ -801,7 +900,7 @@ export default function Index() {
                             </tr>
                           ))}
                           {dbDocuments.length === 0 && (
-                            <tr><td colSpan={5} className="px-2 py-4 text-[#808080] text-center text-[10px]">Нет загруженных документов</td></tr>
+                            <tr><td colSpan={6} className="px-2 py-4 text-[#808080] text-center text-[10px]">Нет загруженных документов</td></tr>
                           )}
                         </tbody>
                       </table>
