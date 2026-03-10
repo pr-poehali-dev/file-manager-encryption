@@ -1,0 +1,12 @@
+{
+  "tests": [
+    {
+      "name": "GET riddles",
+      "method": "GET",
+      "path": "/",
+      "expectedStatus": 200,
+      "expectedBody": {"riddles": []},
+      "bodyMatcher": "partial"
+    }
+  ]
+}

@@ -1,8 +1,12 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 
 const VALID_LOGINS = ["admin", "argentarius", "actuari", "edilus", "cpd", "mortum"];
+const ADMIN_LOGIN = "admin";
 const SESSION_DURATION = 60 * 60 * 1000;
 const PENALTY = 15 * 60 * 1000;
+
+const RIDDLES_URL = "https://functions.poehali.dev/fb6212ce-7863-4f5a-9bca-f2f628978fd2";
+const DOCUMENTS_URL = "https://functions.poehali.dev/69fbae1c-db1f-49dc-a39c-63ccc8caba63";
 
 const FOLDERS = [
   { id: "f1", name: "Телефоны", encrypted: "Т%#@фΩн∆" },
@@ -13,7 +17,7 @@ const FOLDERS = [
   { id: "f6", name: "Архив документов", encrypted: "Арх!∞ д∅к∑м€нт∑" },
 ];
 
-const FILES = [
+const STATIC_FILES = [
   { id: "doc1", folderId: "f1", name: "контакты_список.txt", encrypted: "к∅нт∂кт∑_с∑@с∅к.тхт", type: "txt", content: "СПИСОК КОНТАКТОВ\n================\nАгент 001: +7 (495) 123-45-67\nАгент 002: +7 (812) 987-65-43\nАгент 003: +7 (343) 555-12-34\nКуратор: +7 (495) 000-00-01\n\nВСЕ ДАННЫЕ СТРОГО КОНФИДЕНЦИАЛЬНЫ" },
   { id: "doc2", folderId: "f1", name: "экстренная_связь.txt", encrypted: "€кст∑€нн∂я_с∞яƶь.тхт", type: "txt", content: "ЭКСТРЕННАЯ СВЯЗЬ\n================\nКодовое слово: ОРИОН\nЧастота: 156.800 МГц\nВремя выхода: 03:00 / 15:00\n\nПри компрометации — немедленное молчание" },
   { id: "doc3", folderId: "f2", name: "фоторобот_001.png", encrypted: "ф∅т∅р∅б∅т_∅∅1.пнг", type: "png", content: "[ИЗОБРАЖЕНИЕ: Мужчина, ~40 лет, рост 180 см, тёмные волосы, шрам над левой бровью. Особые приметы: татуировка на запястье в виде якоря]" },
@@ -25,17 +29,6 @@ const FILES = [
   { id: "doc9", folderId: "f6", name: "инструкция_безопасности.txt", encrypted: "!нстр∑кц!∞_б€ƶ∅п∂сн∅ст!.тхт", type: "txt", content: "ИНСТРУКЦИЯ ПО БЕЗОПАСНОСТИ\n==========================\n1. Никогда не разглашать кодовые слова\n2. Сеансы связи — только в назначенное время\n3. Документы не покидают защищённый контур\n4. При угрозе — протокол МОЛЧАНИЕ\n5. Проверка на слежку обязательна" },
 ];
 
-const RIDDLES = [
-  { id: 1, question: "Чем больше берёшь — тем больше становится. Что это?", answer: "яма" },
-  { id: 2, question: "Всегда идёт, а с места не сдвигается. Что это?", answer: "время" },
-  { id: 3, question: "У меня есть города без домов, горы без деревьев, вода без рыбы. Что я такое?", answer: "карта" },
-  { id: 4, question: "Чем больше сохнет — тем мокрее. Что это?", answer: "полотенце" },
-  { id: 5, question: "Говорит без рта, слышит без ушей. Что это?", answer: "эхо" },
-  { id: 6, question: "Днём спит, ночью летает и прохожих пугает. Что это?", answer: "летучая мышь" },
-  { id: 7, question: "Без окон, без дверей — полна горница людей. Что это?", answer: "огурец" },
-  { id: 8, question: "Что можно поймать, но нельзя увидеть?", answer: "простуда" },
-];
-
 type HistoryEvent = {
   time: Date;
   user: string;
@@ -44,7 +37,10 @@ type HistoryEvent = {
 };
 
 type AppState = "login" | "main" | "expired";
-type ActiveTab = "files" | "history" | "help";
+type ActiveTab = "files" | "history" | "help" | "admin";
+
+type Riddle = { id: number; question: string; answer: string; created_at?: string };
+type DbDocument = { id: number; folder_id: string; name: string; encrypted_name: string; file_type: string; created_at?: string };
 
 const btn = (extra = "") =>
   `border-2 border-t-white border-l-white border-b-[#808080] border-r-[#808080] bg-[#c0c0c0] text-black px-3 py-1 text-xs font-mono cursor-pointer active:border-t-[#808080] active:border-l-[#808080] active:border-b-white active:border-r-white select-none hover:bg-[#d4d0c8] ${extra}`;
@@ -68,15 +64,56 @@ export default function Index() {
   const [history, setHistory] = useState<HistoryEvent[]>([]);
   const [showRiddleDialog, setShowRiddleDialog] = useState(false);
   const [riddleContext, setRiddleContext] = useState<"files" | "file">("files");
-  const [currentRiddle, setCurrentRiddle] = useState(RIDDLES[0]);
+  const [currentRiddle, setCurrentRiddle] = useState<Riddle>({ id: 0, question: "", answer: "" });
   const [riddleAnswer, setRiddleAnswer] = useState("");
   const [riddleError, setRiddleError] = useState("");
   const [showExpiredDialog, setShowExpiredDialog] = useState(false);
   const timerRef = useRef<number | null>(null);
 
+  // DB riddles & documents
+  const [dbRiddles, setDbRiddles] = useState<Riddle[]>([]);
+  const [dbDocuments, setDbDocuments] = useState<DbDocument[]>([]);
+  const [fileContents, setFileContents] = useState<Record<string, string>>({});
+
+  // Admin state
+  const [adminTab, setAdminTab] = useState<"riddles" | "docs">("riddles");
+  const [newQuestion, setNewQuestion] = useState("");
+  const [newAnswer, setNewAnswer] = useState("");
+  const [adminMsg, setAdminMsg] = useState("");
+  const [uploadFolder, setUploadFolder] = useState("f1");
+  const [uploadFileName, setUploadFileName] = useState("");
+  const [uploadFileData, setUploadFileData] = useState<string | null>(null);
+  const [uploadFileType, setUploadFileType] = useState("txt");
+  const [uploading, setUploading] = useState(false);
+
   const addHistory = useCallback((user: string, type: HistoryEvent["type"], description: string) => {
     setHistory(prev => [{ time: new Date(), user, type, description }, ...prev]);
   }, []);
+
+  const loadRiddles = async () => {
+    try {
+      const r = await fetch(RIDDLES_URL);
+      const data = await r.json();
+      const parsed = typeof data === "string" ? JSON.parse(data) : data;
+      setDbRiddles(parsed.riddles || []);
+    } catch (_e) { setDbRiddles([]); }
+  };
+
+  const loadDocuments = async () => {
+    try {
+      const r = await fetch(DOCUMENTS_URL);
+      const data = await r.json();
+      const parsed = typeof data === "string" ? JSON.parse(data) : data;
+      setDbDocuments(parsed.documents || []);
+    } catch (_e) { setDbDocuments([]); }
+  };
+
+  useEffect(() => {
+    if (appState === "main") {
+      loadRiddles();
+      loadDocuments();
+    }
+  }, [appState]);
 
   useEffect(() => {
     if (appState !== "main") return;
@@ -120,10 +157,15 @@ export default function Index() {
     setSelectedFolder(null);
     setLoginInput("");
     setShowExpiredDialog(false);
+    setDbRiddles([]);
+    setDbDocuments([]);
   };
 
   const openRiddle = (context: "files" | "file") => {
-    const r = RIDDLES[Math.floor(Math.random() * RIDDLES.length)];
+    const allRiddles = dbRiddles.length > 0 ? dbRiddles : [
+      { id: 0, question: "Всегда идёт, а с места не сдвигается. Что это?", answer: "время" }
+    ];
+    const r = allRiddles[Math.floor(Math.random() * allRiddles.length)];
     setCurrentRiddle(r);
     setRiddleContext(context);
     setRiddleAnswer("");
@@ -160,7 +202,33 @@ export default function Index() {
     return `${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}:${String(sec).padStart(2, "0")}`;
   };
 
-  const selectedFileData = FILES.find(f => f.id === selectedFile);
+  const allFiles = [
+    ...STATIC_FILES.map(f => ({ ...f, isDb: false, dbId: undefined as number | undefined })),
+    ...dbDocuments.map(d => ({
+      id: `db_${d.id}`,
+      folderId: d.folder_id,
+      name: d.name,
+      encrypted: d.encrypted_name,
+      type: d.file_type,
+      content: "",
+      isDb: true,
+      dbId: d.id,
+    }))
+  ];
+
+  const selectedFileData = allFiles.find(f => f.id === selectedFile);
+
+  const loadDbFileContent = async (dbId: number) => {
+    if (fileContents[`db_${dbId}`] !== undefined) return;
+    try {
+      const r = await fetch(`${DOCUMENTS_URL}?action=content&id=${dbId}`);
+      const data = await r.json();
+      const parsed = typeof data === "string" ? JSON.parse(data) : data;
+      setFileContents(prev => ({ ...prev, [`db_${dbId}`]: parsed.content || "[Ошибка загрузки]" }));
+    } catch {
+      setFileContents(prev => ({ ...prev, [`db_${dbId}`]: "[Ошибка загрузки содержимого]" }));
+    }
+  };
 
   const toggleFolder = (fid: string) => {
     const folder = FOLDERS.find(f => f.id === fid);
@@ -174,17 +242,110 @@ export default function Index() {
   };
 
   const handleFileClick = (fileId: string) => {
-    const file = FILES.find(f => f.id === fileId);
+    const file = allFiles.find(f => f.id === fileId);
     setSelectedFile(fileId);
     setFileDecrypted(false);
+    if (file?.isDb && file.dbId) {
+      loadDbFileContent(file.dbId);
+    }
     addHistory(currentUser, "action", `Открыт файл: ${decrypted ? file?.name : file?.encrypted}`);
   };
 
   const encryptedContent = () => {
-    const chars = "∅∑€∂∇◊Ω∞ƶ!@#%^∆Ψ∏∐∫≈≠±§¶";
+    const chars = "∅∑€∂∇◊Ω∞ƶ!@#%^∆Ψ∏∐∫≈≠±";
     return Array.from({ length: 14 }, () =>
       Array.from({ length: 38 }, () => chars[Math.floor(Math.random() * chars.length)]).join("")
     ).join("\n");
+  };
+
+  // Admin: add riddle
+  const handleAddRiddle = async () => {
+    if (!newQuestion.trim() || !newAnswer.trim()) { setAdminMsg("Заполните вопрос и ответ"); return; }
+    setAdminMsg("Сохраняю...");
+    try {
+      const r = await fetch(RIDDLES_URL, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ question: newQuestion.trim(), answer: newAnswer.trim() }),
+      });
+      const data = await r.json();
+      const parsed = typeof data === "string" ? JSON.parse(data) : data;
+      if (parsed.id) {
+        setAdminMsg("Загадка добавлена!");
+        setNewQuestion("");
+        setNewAnswer("");
+        loadRiddles();
+      } else {
+        setAdminMsg("Ошибка: " + (parsed.error || "неизвестно"));
+      }
+    } catch { setAdminMsg("Ошибка соединения"); }
+  };
+
+  // Admin: delete riddle
+  const handleDeleteRiddle = async (id: number) => {
+    setAdminMsg("Удаляю...");
+    try {
+      await fetch(`${RIDDLES_URL}?id=${id}`, { method: "DELETE" });
+      setAdminMsg("Загадка удалена");
+      loadRiddles();
+    } catch { setAdminMsg("Ошибка удаления"); }
+  };
+
+  // Admin: upload file
+  const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const ext = file.name.split(".").pop()?.toLowerCase() || "txt";
+    setUploadFileType(ext === "png" || ext === "jpg" || ext === "jpeg" ? "png" : "txt");
+    setUploadFileName(file.name);
+    const reader = new FileReader();
+    reader.onload = (ev) => {
+      const result = ev.target?.result as string;
+      const b64 = result.split(",")[1];
+      setUploadFileData(b64);
+    };
+    reader.readAsDataURL(file);
+  };
+
+  const handleUpload = async () => {
+    if (!uploadFileData || !uploadFileName) { setAdminMsg("Выберите файл"); return; }
+    setUploading(true);
+    setAdminMsg("Загружаю...");
+    try {
+      const r = await fetch(DOCUMENTS_URL, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          folder_id: uploadFolder,
+          name: uploadFileName,
+          file_type: uploadFileType,
+          file_data: uploadFileData,
+        }),
+      });
+      const data = await r.json();
+      const parsed = typeof data === "string" ? JSON.parse(data) : data;
+      if (parsed.id) {
+        setAdminMsg(`Файл "${uploadFileName}" загружен!`);
+        setUploadFileName("");
+        setUploadFileData(null);
+        loadDocuments();
+      } else {
+        setAdminMsg("Ошибка: " + (parsed.error || "неизвестно"));
+      }
+    } catch { setAdminMsg("Ошибка загрузки"); }
+    setUploading(false);
+  };
+
+  // Admin: delete document
+  const handleDeleteDoc = async (id: number, name: string) => {
+    setAdminMsg("Удаляю...");
+    try {
+      await fetch(`${DOCUMENTS_URL}?id=${id}`, { method: "DELETE" });
+      setAdminMsg(`Документ "${name}" удалён`);
+      setFileContents(prev => { const n = { ...prev }; delete n[`db_${id}`]; return n; });
+      if (selectedFile === `db_${id}`) { setSelectedFile(null); setFileDecrypted(false); }
+      loadDocuments();
+    } catch { setAdminMsg("Ошибка удаления"); }
   };
 
   if (appState === "login") {
@@ -196,10 +357,10 @@ export default function Index() {
               <span className="text-sm">🔐</span>
               <span className="text-white text-xs font-bold">SecureFS 2.0 — Авторизация</span>
             </div>
-            <div className={`${btn("text-[10px] px-1.5 py-0 h-4 flex items-center")}`}>✕</div>
+            <div className={btn("text-[10px] px-1.5 py-0 h-4 flex items-center")}>✕</div>
           </div>
           <div className="p-5 space-y-4">
-            <div className={`${inset("p-4 text-center")}`}>
+            <div className={inset("p-4 text-center")}>
               <div className="text-5xl mb-2">🖥</div>
               <div className="text-xs text-[#000080] font-bold tracking-widest">ЗАКРЫТАЯ СИСТЕМА</div>
               <div className="text-[10px] text-[#808080] mt-1">Доступ только для авторизованных лиц</div>
@@ -234,9 +395,10 @@ export default function Index() {
     );
   }
 
+  const isAdmin = currentUser === ADMIN_LOGIN;
+
   return (
     <div className="w-screen h-screen flex flex-col overflow-hidden bg-[#008080]" style={{ fontFamily: "'Courier New', monospace" }}>
-
       {/* Title bar */}
       <div className="bg-[#000080] px-2 py-1 flex items-center justify-between shrink-0 select-none">
         <div className="flex items-center gap-2">
@@ -244,6 +406,7 @@ export default function Index() {
           <span className="text-white text-xs font-bold">SecureFS 2.0 — Файловый менеджер</span>
           <span className="text-[#8080ff] text-[10px] ml-3">
             Сеанс: <b className="text-yellow-300">{currentUser}</b>
+            {isAdmin && <span className="ml-1 text-orange-300 font-bold">[АДМИНИСТРАТОР]</span>}
           </span>
         </div>
         <div className="flex items-center gap-2">
@@ -260,12 +423,14 @@ export default function Index() {
           { id: "files", label: "📁 Файлы" },
           { id: "history", label: "📋 История" },
           { id: "help", label: "❓ Справка" },
+          ...(isAdmin ? [{ id: "admin", label: "⚙ Администратор" }] : []),
         ] as { id: ActiveTab; label: string }[]).map(tab => (
           <button
             key={tab.id}
-            className={`text-xs px-3 py-0.5 ${activeTab === tab.id ? "bg-[#000080] text-white" : "hover:bg-[#d4d0c8] text-black"}`}
+            className={`text-xs px-3 py-0.5 ${activeTab === tab.id ? "bg-[#000080] text-white" : tab.id === "admin" ? "text-[#800000] font-bold hover:bg-[#d4d0c8]" : "hover:bg-[#d4d0c8] text-black"}`}
             onClick={() => {
               setActiveTab(tab.id);
+              if (tab.id === "admin") { loadRiddles(); loadDocuments(); setAdminMsg(""); }
               addHistory(currentUser, "action", `Раздел: ${tab.label.replace(/^.{2}/, "").trim()}`);
             }}
           >
@@ -288,7 +453,7 @@ export default function Index() {
               <div className="bg-[#000080] px-2 py-0.5 text-white text-[10px] font-bold flex items-center gap-1 select-none">
                 📁 Структура файлов
               </div>
-              <div className={`${inset()} flex-1 overflow-auto`}>
+              <div className={inset() + " flex-1 overflow-auto"}>
                 {FOLDERS.map(folder => (
                   <div key={folder.id}>
                     <div
@@ -296,11 +461,11 @@ export default function Index() {
                       onClick={() => toggleFolder(folder.id)}
                     >
                       <span className="text-sm leading-none">{expandedFolders.has(folder.id) ? "📂" : "📁"}</span>
-                      <span className={decrypted ? "text-black" : "text-[#800000] font-bold"}>
+                      <span className={decrypted ? "" : "text-[#800000] font-bold"}>
                         {decrypted ? folder.name : folder.encrypted}
                       </span>
                     </div>
-                    {expandedFolders.has(folder.id) && FILES.filter(f => f.folderId === folder.id).map(file => (
+                    {expandedFolders.has(folder.id) && allFiles.filter(f => f.folderId === folder.id).map(file => (
                       <div
                         key={file.id}
                         className={`flex items-center gap-1.5 pl-7 pr-2 py-0.5 cursor-pointer text-xs select-none ${selectedFile === file.id ? "bg-[#000080] text-white" : "hover:bg-[#000080] hover:text-white text-black"}`}
@@ -310,6 +475,7 @@ export default function Index() {
                         <span className={decrypted ? "" : "text-[#800000] font-bold"}>
                           {decrypted ? file.name : file.encrypted}
                         </span>
+                        {file.isDb && decrypted && <span className="text-[8px] text-green-700 ml-auto">★</span>}
                       </div>
                     ))}
                   </div>
@@ -317,10 +483,7 @@ export default function Index() {
               </div>
               <div className="bg-[#c0c0c0] border-t-2 border-t-white p-2">
                 {decrypted ? (
-                  <button
-                    className={btn("w-full justify-center")}
-                    onClick={() => { setDecrypted(false); setFileDecrypted(false); addHistory(currentUser, "action", "Список зашифрован вручную"); }}
-                  >
+                  <button className={btn("w-full justify-center")} onClick={() => { setDecrypted(false); setFileDecrypted(false); addHistory(currentUser, "action", "Список зашифрован вручную"); }}>
                     🔒 Зашифровать
                   </button>
                 ) : (
@@ -338,7 +501,7 @@ export default function Index() {
                   ? (fileDecrypted ? selectedFileData.name : selectedFileData.encrypted)
                   : "— нет выбранного файла —"}
               </div>
-              <div className={`${inset()} flex-1 overflow-auto p-3`}>
+              <div className={inset() + " flex-1 overflow-auto p-3"}>
                 {!selectedFileData ? (
                   <div className="text-[#808080] text-xs text-center mt-10">
                     <div className="text-5xl mb-3">📂</div>
@@ -351,9 +514,9 @@ export default function Index() {
                   </pre>
                 ) : (
                   <pre className="text-xs leading-5 whitespace-pre-wrap text-black font-mono">
-                    {selectedFileData.type === "png" ? (
-                      `[ИЗОБРАЖЕНИЕ]\n${"─".repeat(34)}\n\n${selectedFileData.content}`
-                    ) : selectedFileData.content}
+                    {selectedFileData.isDb
+                      ? (fileContents[selectedFileData.id] ?? "Загрузка...")
+                      : selectedFileData.content}
                   </pre>
                 )}
               </div>
@@ -370,7 +533,7 @@ export default function Index() {
                   )
                 )}
                 <div className="ml-auto text-[10px] text-[#808080]">
-                  {selectedFileData ? `Формат: .${selectedFileData.type.toUpperCase()} | ${selectedFileData.folderId}` : "Готово"}
+                  {selectedFileData ? `Формат: .${selectedFileData.type.toUpperCase()}` : "Готово"}
                 </div>
               </div>
             </div>
@@ -382,7 +545,7 @@ export default function Index() {
             <div className="bg-[#000080] px-2 py-0.5 text-white text-[10px] font-bold select-none">
               📋 Журнал событий системы
             </div>
-            <div className={`${inset()} flex-1 overflow-auto`}>
+            <div className={inset() + " flex-1 overflow-auto"}>
               {history.length === 0 ? (
                 <div className="text-[#808080] text-xs p-4">Журнал пуст</div>
               ) : (
@@ -397,9 +560,7 @@ export default function Index() {
                   <tbody>
                     {history.map((ev, i) => (
                       <tr key={i} className={`border-b border-[#e0e0e0] ${i % 2 === 0 ? "bg-white" : "bg-[#f8f8f8]"}`}>
-                        <td className="px-2 py-0.5 text-[#808080] border-r border-[#e0e0e0] whitespace-nowrap text-[10px]">
-                          {ev.time.toLocaleTimeString("ru-RU")}
-                        </td>
+                        <td className="px-2 py-0.5 text-[#808080] border-r border-[#e0e0e0] whitespace-nowrap text-[10px]">{ev.time.toLocaleTimeString("ru-RU")}</td>
                         <td className="px-2 py-0.5 border-r border-[#e0e0e0] text-[#000080] font-bold text-[10px]">{ev.user}</td>
                         <td className="px-2 py-0.5 border-r border-[#e0e0e0]">
                           <span className={`px-1.5 py-0.5 text-[9px] font-bold ${
@@ -410,12 +571,9 @@ export default function Index() {
                             ev.type === "session_expired" ? "bg-red-200 text-red-900 border border-red-400" :
                             "bg-[#e8e8e8] text-[#404040] border border-[#c0c0c0]"
                           }`}>
-                            {ev.type === "login" ? "ВХОД" :
-                             ev.type === "logout" ? "ВЫХОД" :
-                             ev.type === "decrypt_ok" ? "РАСШ. ✓" :
-                             ev.type === "decrypt_fail" ? "РАСШ. ✗" :
-                             ev.type === "session_expired" ? "ИСТЕЧЕНИЕ" :
-                             "ДЕЙСТВИЕ"}
+                            {ev.type === "login" ? "ВХОД" : ev.type === "logout" ? "ВЫХОД" :
+                             ev.type === "decrypt_ok" ? "РАСШ. ✓" : ev.type === "decrypt_fail" ? "РАСШ. ✗" :
+                             ev.type === "session_expired" ? "ИСТЕЧЕНИЕ" : "ДЕЙСТВИЕ"}
                           </span>
                         </td>
                         <td className="px-2 py-0.5 text-[10px]">{ev.description}</td>
@@ -427,17 +585,15 @@ export default function Index() {
             </div>
             <div className="bg-[#c0c0c0] border-t-2 border-t-white p-2 flex justify-between items-center">
               <span className="text-[10px] text-[#808080]">Всего записей: {history.length}</span>
-              <button className={btn()} onClick={() => { setHistory([]); }}>Очистить журнал</button>
+              <button className={btn()} onClick={() => setHistory([])}>Очистить журнал</button>
             </div>
           </div>
         )}
 
         {activeTab === "help" && (
           <div className="flex-1 flex flex-col">
-            <div className="bg-[#000080] px-2 py-0.5 text-white text-[10px] font-bold select-none">
-              ❓ Справочная система SecureFS
-            </div>
-            <div className={`${inset()} flex-1 overflow-auto p-4`}>
+            <div className="bg-[#000080] px-2 py-0.5 text-white text-[10px] font-bold select-none">❓ Справочная система SecureFS</div>
+            <div className={inset() + " flex-1 overflow-auto p-4"}>
               <div className="text-xs space-y-4 font-mono max-w-2xl">
                 <div>
                   <div className="font-bold text-[#000080] text-sm mb-0.5">SecureFS 2.0 — Руководство пользователя</div>
@@ -450,7 +606,7 @@ export default function Index() {
                   { icon: "📁", title: "Файловый менеджер", text: "Левая панель содержит папки и файлы. Нажмите на папку для раскрытия содержимого. Нажмите на файл для просмотра в правой панели." },
                   { icon: "🔒", title: "Шифрование данных", text: "Все имена файлов и содержимое документов зашифрованы. Для просмотра используйте кнопку «Расшифровать» в нижней части каждой панели." },
                   { icon: "🧩", title: "Система загадок", text: "При расшифровке система задаёт контрольную загадку. Правильный ответ открывает данные. Неверный ответ — штраф 15 минут от сессии. Ответ вводится строчными буквами." },
-                  { icon: "📋", title: "Журнал событий", text: "В разделе «История» хранится полный журнал всех действий: входы, открытия файлов, успешные и неуспешные попытки расшифровки." },
+                  { icon: "⚙", title: "Администратор", text: "Пользователь admin имеет доступ к панели администратора. Там можно добавлять и удалять загадки, а также загружать документы в папки файлового менеджера." },
                 ].map((item, i) => (
                   <div key={i} className="flex gap-3 border-l-4 border-[#000080] pl-3">
                     <span className="text-lg shrink-0">{item.icon}</span>
@@ -464,12 +620,208 @@ export default function Index() {
             </div>
           </div>
         )}
+
+        {activeTab === "admin" && isAdmin && (
+          <div className="flex-1 flex flex-col">
+            <div className="bg-[#800000] px-2 py-0.5 text-white text-[10px] font-bold select-none flex items-center gap-2">
+              ⚙ Панель администратора — SecureFS 2.0
+              <span className="text-orange-300 text-[9px]">ОГРАНИЧЕННЫЙ ДОСТУП</span>
+            </div>
+
+            {/* Admin sub-tabs */}
+            <div className="bg-[#c0c0c0] border-b border-[#808080] px-1 py-0.5 flex gap-0.5 shrink-0">
+              <button
+                className={`text-xs px-3 py-0.5 ${adminTab === "riddles" ? "bg-[#800000] text-white" : "hover:bg-[#d4d0c8] text-black"}`}
+                onClick={() => setAdminTab("riddles")}
+              >
+                🧩 Загадки ({dbRiddles.length})
+              </button>
+              <button
+                className={`text-xs px-3 py-0.5 ${adminTab === "docs" ? "bg-[#800000] text-white" : "hover:bg-[#d4d0c8] text-black"}`}
+                onClick={() => setAdminTab("docs")}
+              >
+                📄 Документы ({dbDocuments.length})
+              </button>
+            </div>
+
+            <div className="flex-1 flex gap-2 overflow-hidden p-0">
+              {adminTab === "riddles" && (
+                <>
+                  {/* Add riddle form */}
+                  <div className="flex flex-col w-80 shrink-0 p-2">
+                    <div className="bg-[#c0c0c0] border-2 border-t-white border-l-white border-b-[#808080] border-r-[#808080] p-3 space-y-2">
+                      <div className="text-xs font-bold border-b border-[#808080] pb-1 mb-2">➕ Добавить загадку</div>
+                      <div>
+                        <label className="text-[10px] font-bold block mb-1">Вопрос (загадка):</label>
+                        <textarea
+                          className={inset("w-full px-2 py-1 text-xs resize-none")}
+                          rows={3}
+                          value={newQuestion}
+                          onChange={e => setNewQuestion(e.target.value)}
+                          placeholder="Введите текст загадки..."
+                        />
+                      </div>
+                      <div>
+                        <label className="text-[10px] font-bold block mb-1">Правильный ответ:</label>
+                        <input
+                          className={inset("w-full px-2 py-1.5 text-xs")}
+                          value={newAnswer}
+                          onChange={e => setNewAnswer(e.target.value)}
+                          placeholder="одно слово строчными..."
+                          onKeyDown={e => e.key === "Enter" && handleAddRiddle()}
+                        />
+                      </div>
+                      <button className={btn("w-full justify-center")} onClick={handleAddRiddle}>
+                        Сохранить загадку
+                      </button>
+                      {adminMsg && (
+                        <div className={`text-[10px] px-2 py-1 border ${adminMsg.includes("Ошибка") ? "border-red-400 bg-red-50 text-red-800" : "border-green-400 bg-green-50 text-green-800"}`}>
+                          {adminMsg}
+                        </div>
+                      )}
+                    </div>
+                  </div>
+
+                  {/* Riddles list */}
+                  <div className="flex-1 flex flex-col p-2 pl-0">
+                    <div className={inset() + " flex-1 overflow-auto"}>
+                      <table className="w-full text-xs font-mono border-collapse">
+                        <thead>
+                          <tr className="bg-[#c0c0c0]">
+                            <th className="text-left px-2 py-1 border-b-2 border-b-[#808080] text-[10px] w-8">#</th>
+                            <th className="text-left px-2 py-1 border-b-2 border-b-[#808080] text-[10px]">Загадка</th>
+                            <th className="text-left px-2 py-1 border-b-2 border-b-[#808080] text-[10px] w-28">Ответ</th>
+                            <th className="px-2 py-1 border-b-2 border-b-[#808080] text-[10px] w-16">Удалить</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {dbRiddles.map((r, i) => (
+                            <tr key={r.id} className={`border-b border-[#e0e0e0] ${i % 2 === 0 ? "bg-white" : "bg-[#f8f8f8]"}`}>
+                              <td className="px-2 py-1 text-[#808080] text-[10px]">{r.id}</td>
+                              <td className="px-2 py-1 text-[11px] max-w-xs">{r.question}</td>
+                              <td className="px-2 py-1 text-[#000080] font-bold text-[10px]">{r.answer}</td>
+                              <td className="px-2 py-1 text-center">
+                                <button
+                                  className={btn("text-[10px] px-2 py-0.5 text-red-800 hover:bg-red-100")}
+                                  onClick={() => handleDeleteRiddle(r.id)}
+                                >
+                                  ✕
+                                </button>
+                              </td>
+                            </tr>
+                          ))}
+                          {dbRiddles.length === 0 && (
+                            <tr><td colSpan={4} className="px-2 py-4 text-[#808080] text-center text-[10px]">Нет загадок</td></tr>
+                          )}
+                        </tbody>
+                      </table>
+                    </div>
+                    <div className="bg-[#c0c0c0] border-t-2 border-t-white p-2 flex justify-between items-center">
+                      <span className="text-[10px] text-[#808080]">Загадок в базе: {dbRiddles.length}</span>
+                      <button className={btn("text-[10px]")} onClick={loadRiddles}>⟳ Обновить</button>
+                    </div>
+                  </div>
+                </>
+              )}
+
+              {adminTab === "docs" && (
+                <>
+                  {/* Upload form */}
+                  <div className="flex flex-col w-80 shrink-0 p-2">
+                    <div className="bg-[#c0c0c0] border-2 border-t-white border-l-white border-b-[#808080] border-r-[#808080] p-3 space-y-2">
+                      <div className="text-xs font-bold border-b border-[#808080] pb-1 mb-2">📤 Загрузить документ</div>
+                      <div>
+                        <label className="text-[10px] font-bold block mb-1">Папка назначения:</label>
+                        <select
+                          className={inset("w-full px-2 py-1.5 text-xs")}
+                          value={uploadFolder}
+                          onChange={e => setUploadFolder(e.target.value)}
+                        >
+                          {FOLDERS.map(f => (
+                            <option key={f.id} value={f.id}>{f.name}</option>
+                          ))}
+                        </select>
+                      </div>
+                      <div>
+                        <label className="text-[10px] font-bold block mb-1">Файл (.txt или .png):</label>
+                        <div className={inset("w-full px-2 py-1.5 text-[10px] text-[#808080] truncate")}>
+                          {uploadFileName || "файл не выбран"}
+                        </div>
+                        <label className={btn("w-full justify-center mt-1 block text-center cursor-pointer")}>
+                          Обзор...
+                          <input type="file" className="hidden" accept=".txt,.png,.jpg,.jpeg" onChange={handleFileSelect} />
+                        </label>
+                      </div>
+                      <button
+                        className={btn(`w-full justify-center ${uploading ? "opacity-50" : ""}`)}
+                        onClick={handleUpload}
+                        disabled={uploading}
+                      >
+                        {uploading ? "Загружаю..." : "📤 Загрузить в систему"}
+                      </button>
+                      {adminMsg && (
+                        <div className={`text-[10px] px-2 py-1 border ${adminMsg.includes("Ошибка") ? "border-red-400 bg-red-50 text-red-800" : "border-green-400 bg-green-50 text-green-800"}`}>
+                          {adminMsg}
+                        </div>
+                      )}
+                      <div className="text-[9px] text-[#808080] border-t border-[#c0c0c0] pt-2">
+                        Загруженные файлы отмечены ★ в файловом менеджере
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Documents list */}
+                  <div className="flex-1 flex flex-col p-2 pl-0">
+                    <div className={inset() + " flex-1 overflow-auto"}>
+                      <table className="w-full text-xs font-mono border-collapse">
+                        <thead>
+                          <tr className="bg-[#c0c0c0]">
+                            <th className="text-left px-2 py-1 border-b-2 border-b-[#808080] text-[10px] w-8">#</th>
+                            <th className="text-left px-2 py-1 border-b-2 border-b-[#808080] text-[10px]">Имя файла</th>
+                            <th className="text-left px-2 py-1 border-b-2 border-b-[#808080] text-[10px] w-28">Папка</th>
+                            <th className="text-left px-2 py-1 border-b-2 border-b-[#808080] text-[10px] w-16">Тип</th>
+                            <th className="px-2 py-1 border-b-2 border-b-[#808080] text-[10px] w-16">Удалить</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {dbDocuments.map((d, i) => (
+                            <tr key={d.id} className={`border-b border-[#e0e0e0] ${i % 2 === 0 ? "bg-white" : "bg-[#f8f8f8]"}`}>
+                              <td className="px-2 py-1 text-[#808080] text-[10px]">{d.id}</td>
+                              <td className="px-2 py-1 text-[11px]">{d.name}</td>
+                              <td className="px-2 py-1 text-[#000080] text-[10px]">{FOLDERS.find(f => f.id === d.folder_id)?.name || d.folder_id}</td>
+                              <td className="px-2 py-1 text-[10px] uppercase">.{d.file_type}</td>
+                              <td className="px-2 py-1 text-center">
+                                <button
+                                  className={btn("text-[10px] px-2 py-0.5 text-red-800 hover:bg-red-100")}
+                                  onClick={() => handleDeleteDoc(d.id, d.name)}
+                                >
+                                  ✕
+                                </button>
+                              </td>
+                            </tr>
+                          ))}
+                          {dbDocuments.length === 0 && (
+                            <tr><td colSpan={5} className="px-2 py-4 text-[#808080] text-center text-[10px]">Нет загруженных документов</td></tr>
+                          )}
+                        </tbody>
+                      </table>
+                    </div>
+                    <div className="bg-[#c0c0c0] border-t-2 border-t-white p-2 flex justify-between items-center">
+                      <span className="text-[10px] text-[#808080]">Документов в системе: {dbDocuments.length}</span>
+                      <button className={btn("text-[10px]")} onClick={loadDocuments}>⟳ Обновить</button>
+                    </div>
+                  </div>
+                </>
+              )}
+            </div>
+          </div>
+        )}
       </div>
 
       {/* Status bar */}
       <div className="bg-[#c0c0c0] border-t-2 border-t-white flex items-center px-2 py-0.5 gap-2 shrink-0 select-none">
         <div className={inset("px-2 text-[10px] text-[#404040] py-0.5 mr-1")}>
-          Объектов: {selectedFolder ? FILES.filter(f => f.folderId === selectedFolder).length : 0}
+          Объектов: {selectedFolder ? allFiles.filter(f => f.folderId === selectedFolder).length : 0}
         </div>
         <div className={inset("px-2 text-[10px] text-[#404040] py-0.5")}>
           {decrypted ? "🔓 Расшифровка активна" : "🔒 Данные зашифрованы"}
@@ -538,10 +890,7 @@ export default function Index() {
                   Для продолжения работы необходим повторный вход.
                 </div>
               </div>
-              <button
-                className={btn("w-full text-center justify-center")}
-                onClick={handleLogout}
-              >
+              <button className={btn("w-full text-center justify-center")} onClick={handleLogout}>
                 Вернуться к авторизации
               </button>
             </div>
